@@ -1,0 +1,5 @@
+# Given some text from a speaker, give a conversational response
+string text # speaker statement
+string options # any options for the conversation
+---
+string response
