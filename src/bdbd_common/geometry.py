@@ -71,7 +71,7 @@ def rotationCenter(frame, vx, vy, omega):
     center.point.y = r
     return center
 
-def shortestPath(rho, phi, x, y):
+def shortestPath( x, y, phi, rho):
     '''
         shortest path from (0, 0) to a point at (x, y), with ending orientation phi from current
         orientation. Travel in either straight lines, or on circles of radius rho.
@@ -85,17 +85,17 @@ def shortestPath(rho, phi, x, y):
     sc_cw = [0.0, -rho]
 
     # fc: end_circle
-    fc_ccw = [x - rho * math.sin(phi), y + rho * math.cos(phi)]
-    fc_cw = [x + rho * math.sin(phi), y - rho * math.cos(phi)]
+    fc_ccw = (x - rho * math.sin(phi), y + rho * math.cos(phi))
+    fc_cw = (x + rho * math.sin(phi), y - rho * math.cos(phi))
 
     A = [0., 0.] # starting point
     B = [x, y]   # ending point
     solutions = []
-    # direction: 0 == ccw, 1 == cw
-    for start_dir in (0, 1):
-        for end_dir in (0, 1):
-            C = sc_ccw if start_dir == 0 else sc_cw  # start motion circle center
-            D = fc_ccw if end_dir == 0 else fc_cw    # end motion circle center
+    # direction: 1 == ccw, -1 == cw
+    for start_dir in (1, -1):
+        for end_dir in (1, -1):
+            C = sc_ccw if start_dir == 1 else sc_cw  # start motion circle center
+            D = fc_ccw if end_dir == 1 else fc_cw    # end motion circle center
             a = D[0] - C[0]
             b = D[1] - C[1]
             theta = math.atan2(b, a)
@@ -106,30 +106,36 @@ def shortestPath(rho, phi, x, y):
             else:
                 if start_dir == end_dir:
                     ssq = tsq
-                    beta = theta if start_dir == 0  else -theta
+                    beta = theta if start_dir == 1  else -theta
                 else:
                     ssq = tsq - 4. * rho**2
                     psi = math.acos(2. * rho / math.sqrt(tsq))
-                    alpha = psi - theta if start_dir == 0 else psi + theta
+                    alpha = psi - theta if start_dir == 1 else psi + theta
                     beta = math.pi/ 2. - alpha
                 s = math.sqrt(ssq)
                 beta = beta % TWOPI
 
-                E = [rho * math.sin(beta), 1. - rho * math.cos(beta)] # transition from start circle to line
-                if start_dir == 1:
+                E = [rho * math.sin(beta), rho * (1. - math.cos(beta))] # transition from start circle to line
+                if start_dir == -1:
                     E[1] = -E[1]
-                # F is transition from line to final circle
-                if end_dir == 0:
-                    F = [D[0] + rho * math.sin(beta), D[1] - rho * math.cos(beta)]
+                # F is transition from line to final circle See RKJ 2020-09-22
+                if start_dir == 1:
+                    if end_dir == 1:
+                        F = [D[0] + rho * math.sin(beta), D[1] - rho * math.cos(beta)]
+                    else:
+                        F = [D[0] - rho * math.sin(beta), D[1] + rho * math.cos(beta)]
                 else:
-                    F = [D[0] - rho * math.sin(beta), D[1] + rho * math.cos(beta)]
+                    if end_dir == 1:
+                        F = [D[0] - rho * math.sin(beta), D[1] - rho * math.cos(beta)]
+                    else:
+                        F = [D[0] + rho * math.sin(beta), D[1] + rho * math.cos(beta)]
 
                 # RKJ notebook 2020-08-26
-                if start_dir == 0 and end_dir == 0:
+                if start_dir == 1 and end_dir == 1:
                     gamma = phi - beta
-                elif start_dir == 0 and end_dir == 1:
+                elif start_dir == 1 and end_dir == -1:
                     gamma = beta - phi
-                elif start_dir == 1 and end_dir == 0:
+                elif start_dir == -1 and end_dir == 1:
                     gamma = beta + phi
                 else:
                     gamma = -beta - phi
@@ -138,14 +144,36 @@ def shortestPath(rho, phi, x, y):
                 length = s + rho * beta + rho * gamma
                 solution = {'dir': (start_dir, end_dir), 'length': length, 'E': E, 'F': F, 'beta': beta, 'gamma': gamma}
                 solutions.append(solution)
-                #print(solution)
 
-    # return the best solution
+    # determine the best solution
     solution = solutions[0]
+    print(fstr(solution))
     for i in range(1, len(solutions)):
+        print(fstr(solutions[i]))
         if solutions[i]['length'] < solution['length']:
             solution = solutions[i]
-    return solution
+
+    # return a path plan
+    first_arc = {
+        'start': (0.0, 0.0, 0.0),
+        'end': (solution['E'][0], solution['E'][1], solution['beta']),
+        'center': sc_ccw if solution['dir'][0] == 1 else sc_cw,
+        'radius': rho,
+        'angle': solution['beta'] * solution['dir'][0]
+    }
+    second_segment = {
+        'start': first_arc['end'],
+        'end': (solution['F'][0], solution['F'][1], solution['beta'])
+    }
+    third_arc = {
+        'start': second_segment['end'],
+        'end': (x, y, phi),
+        'center': fc_ccw if solution['dir'][1] == 1 else fc_cw,
+        'radius': rho,
+        'angle': solution['gamma'] *  solution['dir'][1]
+    }
+    motion_plan = [first_arc, second_segment, third_arc]
+    return motion_plan
 
 def ccwPath(phi, x, y):
     '''
@@ -162,7 +190,7 @@ def ccwPath(phi, x, y):
     try:
         rho = 2. * C / (-B - math.sqrt(B**2 - 4. * A * C))
     except ZeroDivisionError:
-        rho = 1.e10
+        return ccwPath(phi + 1.e-6, x, y)
 
     #   Calculate diagram values
 
@@ -179,18 +207,43 @@ def ccwPath(phi, x, y):
     # arc angle for second circle. If negative, solution is invalid.
     gamma = beta - phi
     returns = {}
-    for v in ['rho', 'beta', 'e', 'gamma']:
+    for v in ['rho', 'beta', 'e', 'gamma', 'a', 'b']:
         returns[v] = eval(v)
+    print(fstr(returns))
     return returns
 
-def nearPath(phi, x, y):
+def nearPath(x, y, phi):
     # see ccw path
     path = ccwPath(phi, x, y)
-    if path['gamma'] <= 0.0:
+    if path['gamma'] < 0.0 or path['beta'] < 0.0:
+        # try a clockwise rotation
         path = ccwPath(-phi, x, -y)
+        if path['gamma'] < 0.0 or path['beta'] < 0.0:
+            # solution requires two circles of same rotation, which we do not support
+            return None
         path['beta'] *= -1
         path['e'][1] *= -1
-    return path
+    # calculate the motion plan
+    if path:
+        first_arc = {
+            'start': (0.0, 0.0, 0.0),
+            'end': (path['e'][0], path['e'][1], path['beta']),
+            'center': (0.0, math.copysign(path['rho'], path['beta'])),
+            'radius': path['rho'],
+            'angle': path['beta']
+        }
+        second_arc = {
+            'start': first_arc['end'],
+            'end': (x, y, phi),
+            'center': (path['a'], path['rho'] - path['b']),
+            'radius': path['rho'],
+            'angle': -math.copysign(path['gamma'], path['beta'])
+        }
+        motion_plan = [first_arc, second_arc]
+    else:
+        motion_plan = None
+
+    return motion_plan
 
 def b_to_w(base_pose, dx):
     # given the base pose, return the wheel pose
