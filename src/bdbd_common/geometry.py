@@ -141,15 +141,27 @@ def shortestPath( x, y, phi, rho):
                     gamma = -beta - phi
 
                 gamma = gamma % TWOPI
-                length = s + rho * beta + rho * gamma
-                solution = {'dir': (start_dir, end_dir), 'length': length, 'E': E, 'F': F, 'beta': beta, 'gamma': gamma}
+                l0 = rho * beta
+                l1 = s
+                l2 = rho * gamma
+                solution = {
+                    'dir': (start_dir, end_dir),
+                    'l0': l0,
+                    'l1': l1,
+                    'l2': l2,
+                    'length': l0 + l1 + l2,
+                    'E': E,
+                    'F': F,
+                    'beta': beta,
+                    'gamma': gamma
+                }
                 solutions.append(solution)
 
     # determine the best solution
     solution = solutions[0]
-    print(fstr(solution))
+    #print(fstr(solution))
     for i in range(1, len(solutions)):
-        print(fstr(solutions[i]))
+        #print(fstr(solutions[i]))
         if solutions[i]['length'] < solution['length']:
             solution = solutions[i]
 
@@ -159,20 +171,36 @@ def shortestPath( x, y, phi, rho):
         'end': (solution['E'][0], solution['E'][1], solution['beta']),
         'center': sc_ccw if solution['dir'][0] == 1 else sc_cw,
         'radius': rho,
-        'angle': solution['beta'] * solution['dir'][0]
+        'angle': solution['beta'] * solution['dir'][0],
+        'length': solution['l0']
     }
     second_segment = {
         'start': first_arc['end'],
-        'end': (solution['F'][0], solution['F'][1], solution['beta'])
+        'end': (solution['F'][0], solution['F'][1], solution['beta']),
+        'length': solution['l1']
     }
     third_arc = {
         'start': second_segment['end'],
         'end': (x, y, phi),
         'center': fc_ccw if solution['dir'][1] == 1 else fc_cw,
         'radius': rho,
-        'angle': solution['gamma'] *  solution['dir'][1]
+        'angle': solution['gamma'] *  solution['dir'][1],
+        'length': solution['l2']
     }
-    motion_plan = [first_arc, second_segment, third_arc]
+
+    motion_plan = []
+    if first_arc['angle'] != 0.0:
+        motion_plan.append(first_arc)
+
+    if (
+        second_segment['start'][0] != second_segment['end'][0] or
+        second_segment['start'][1] != second_segment['end'][1]
+    ):
+        motion_plan.append(second_segment)
+
+    if third_arc['angle'] != 0.0:
+        motion_plan.append(third_arc)
+       
     return motion_plan
 
 def ccwPath(phi, x, y):
@@ -209,7 +237,7 @@ def ccwPath(phi, x, y):
     returns = {}
     for v in ['rho', 'beta', 'e', 'gamma', 'a', 'b']:
         returns[v] = eval(v)
-    print(fstr(returns))
+    #print(fstr(returns))
     return returns
 
 def nearPath(x, y, phi):
@@ -230,14 +258,16 @@ def nearPath(x, y, phi):
             'end': (path['e'][0], path['e'][1], path['beta']),
             'center': (0.0, math.copysign(path['rho'], path['beta'])),
             'radius': path['rho'],
-            'angle': path['beta']
+            'angle': path['beta'],
+            'length': abs(path['beta'] * path['rho'])
         }
         second_arc = {
             'start': first_arc['end'],
             'end': (x, y, phi),
             'center': (path['a'], path['rho'] - path['b']),
             'radius': path['rho'],
-            'angle': -math.copysign(path['gamma'], path['beta'])
+            'angle': -math.copysign(path['gamma'], path['beta']),
+            'length': abs(path['rho'] * path['gamma'])
         }
         motion_plan = [first_arc, second_arc]
     else:
@@ -271,7 +301,7 @@ def lrEstimate(path, lr_model, start_twist, dt=0.025, left0 = 0.0, right0 = 0.0)
     gamma = path['gamma']
     length1 = abs(beta * rho)
     length2 = abs(gamma * rho)
-    print(fstr({'length1': length1, 'length2': length2}))
+    #print(fstr({'length1': length1, 'length2': length2}))
 
     start_v = start_twist[0]
     start_o = start_twist[2]
@@ -293,7 +323,7 @@ def lrEstimate(path, lr_model, start_twist, dt=0.025, left0 = 0.0, right0 = 0.0)
     v_1 = vhat / (1. + vhat/(rho * omegahat))
     o_1 = math.copysign(v_1 / rho, beta)
     o_2 = -o_1
-    print(fstr({'v_1': v_1, 'o_1': o_1, 'o_2:': o_2}))
+    #print(fstr({'v_1': v_1, 'o_1': o_1, 'o_2:': o_2}))
 
     # velocity will vary linearly with time, so the required time can be estimated from the velocity.
     net_time = 2. * (length1 + length2) / v_1
@@ -323,7 +353,7 @@ def lrEstimate(path, lr_model, start_twist, dt=0.025, left0 = 0.0, right0 = 0.0)
         left = (v * d - omega * b) / denom_left
         right = (v * c - omega * a) / denom_right
         lrs.append({'t': t, 'left': left, 'right': right})
-        print(fstr({'t': t, 'left': left, 'right': right, 's': s, 'v': v, 'omega': omega}))
+        #print(fstr({'t': t, 'left': left, 'right': right, 's': s, 'v': v, 'omega': omega}))
 
     return lrs
 
