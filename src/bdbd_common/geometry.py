@@ -2,12 +2,14 @@
 
 import tf
 import math
+from math import sin, cos, pi, sqrt, atan2
 import rospy
 from geometry_msgs.msg import Quaternion, PoseStamped, PointStamped
 from bdbd_common.utils import fstr
 
-D_TO_R = math.pi / 180. # degrees to radians
-TWOPI = 2. * math.pi
+D_TO_R = pi / 180. # degrees to radians
+TWOPI = 2. * pi
+HALFPI = pi / 2.0
 
 def poseDistance(pose1, pose2):
     # calculate the distance between two PoseStamped types in the same frame
@@ -15,7 +17,7 @@ def poseDistance(pose1, pose2):
         raise RuntimeError('poses must be in the same frame')
     p1 = pose1.pose.position
     p2 = pose2.pose.position
-    return math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2 + (p1.z - p2.z)**2)
+    return sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2 + (p1.z - p2.z)**2)
 
 def poseTheta(pose1, pose2):
     # calculate the rotation on z axis between two PoseStamped types
@@ -71,7 +73,7 @@ def rotationCenter(frame, vx, vy, omega):
     center.point.y = r
     return center
 
-def shortestPath( x, y, phi, rho):
+def threeSegmentPath( x, y, phi, rho):
     '''
         shortest path from (0, 0) to a point at (x, y), with ending orientation phi from current
         orientation. Travel in either straight lines, or on circles of radius rho.
@@ -85,8 +87,8 @@ def shortestPath( x, y, phi, rho):
     sc_cw = [0.0, -rho]
 
     # fc: end_circle
-    fc_ccw = (x - rho * math.sin(phi), y + rho * math.cos(phi))
-    fc_cw = (x + rho * math.sin(phi), y - rho * math.cos(phi))
+    fc_ccw = (x - rho * sin(phi), y + rho * cos(phi))
+    fc_cw = (x + rho * sin(phi), y - rho * cos(phi))
 
     A = [0., 0.] # starting point
     B = [x, y]   # ending point
@@ -98,7 +100,7 @@ def shortestPath( x, y, phi, rho):
             D = fc_ccw if end_dir == 1 else fc_cw    # end motion circle center
             a = D[0] - C[0]
             b = D[1] - C[1]
-            theta = math.atan2(b, a)
+            theta = atan2(b, a)
             tsq = a**2 + b**2
             if start_dir != end_dir and tsq - 4. * rho **2 < 0.:
                 #print('dir: {} {} invalid'.format(start_dir, end_dir))
@@ -109,26 +111,26 @@ def shortestPath( x, y, phi, rho):
                     beta = theta if start_dir == 1  else -theta
                 else:
                     ssq = tsq - 4. * rho**2
-                    psi = math.acos(2. * rho / math.sqrt(tsq))
+                    psi = math.acos(2. * rho / sqrt(tsq))
                     alpha = psi - theta if start_dir == 1 else psi + theta
-                    beta = math.pi/ 2. - alpha
-                s = math.sqrt(ssq)
+                    beta = pi/ 2. - alpha
+                s = sqrt(ssq)
                 beta = beta % TWOPI
 
-                E = [rho * math.sin(beta), rho * (1. - math.cos(beta))] # transition from start circle to line
+                E = [rho * sin(beta), rho * (1. - cos(beta))] # transition from start circle to line
                 if start_dir == -1:
                     E[1] = -E[1]
                 # F is transition from line to final circle See RKJ 2020-09-22
                 if start_dir == 1:
                     if end_dir == 1:
-                        F = [D[0] + rho * math.sin(beta), D[1] - rho * math.cos(beta)]
+                        F = [D[0] + rho * sin(beta), D[1] - rho * cos(beta)]
                     else:
-                        F = [D[0] - rho * math.sin(beta), D[1] + rho * math.cos(beta)]
+                        F = [D[0] - rho * sin(beta), D[1] + rho * cos(beta)]
                 else:
                     if end_dir == 1:
-                        F = [D[0] - rho * math.sin(beta), D[1] - rho * math.cos(beta)]
+                        F = [D[0] - rho * sin(beta), D[1] - rho * cos(beta)]
                     else:
-                        F = [D[0] + rho * math.sin(beta), D[1] + rho * math.cos(beta)]
+                        F = [D[0] + rho * sin(beta), D[1] + rho * cos(beta)]
 
                 # RKJ notebook 2020-08-26
                 if start_dir == 1 and end_dir == 1:
@@ -181,7 +183,7 @@ def shortestPath( x, y, phi, rho):
     }
     third_arc = {
         'start': second_segment['end'],
-        'end': (x, y, phi),
+        'end': (x, y, (phi + pi) % (2.0 * pi) - pi),
         'center': fc_ccw if solution['dir'][1] == 1 else fc_cw,
         'radius': rho,
         'angle': solution['gamma'] *  solution['dir'][1],
@@ -210,49 +212,54 @@ def ccwPath(phi, x, y):
         See RKJ notebook circa 2020-09-12. This solution is just for initial CCW rotation. Negate
         phi, Y, ey,  beta for CW rotation.
     '''
-    A = 1.0 - math.cos(phi)
-    B = y * (1. + math.cos(phi)) - x * math.sin(phi)
+    A = 1.0 - cos(phi)
+    B = y * (1. + cos(phi)) - x * sin(phi)
     C = - (x**2 + y**2) / 2.
 
     # alternate form of quadratic equation, allows zero A
     try:
-        rho = 2. * C / (-B - math.sqrt(B**2 - 4. * A * C))
+        rho = 2. * C / (-B - sqrt(B**2 - 4. * A * C))
     except ZeroDivisionError:
         return ccwPath(phi + 1.e-6, x, y)
 
     #   Calculate diagram values
 
     # x distance from target point to second circle center
-    g = rho * math.sin(phi)
+    g = rho * sin(phi)
     # x distance between circle centers
     a = x + g
     # y distance between circle centers.
-    b = rho * (1. + math.cos(phi)) - y
+    b = rho * (1. + cos(phi)) - y
     # arc angle on first circle. Also orientation of robot at intersection point.
-    beta = math.atan2(a , b)
+    beta = (atan2(a , b) + TWOPI) % TWOPI
     # intersection coordinates of circle tangents
-    e = [rho * math.sin(beta), rho * (1. - math.cos(beta))]
-    # arc angle for second circle. If negative, solution is invalid.
-    gamma = beta - phi
+    e = [rho * sin(beta), rho * (1. - cos(beta))]
+    length = rho * beta
+    gamma = (beta - phi + TWOPI) % TWOPI
     returns = {}
-    for v in ['rho', 'beta', 'e', 'gamma', 'a', 'b']:
+    for v in ['rho', 'beta', 'e', 'gamma', 'a', 'b', 'length']:
         returns[v] = eval(v)
-    #print(fstr(returns))
     return returns
 
 def nearPath(x, y, phi):
+    # compatibility-mostly: return the shortest twoArcPlan
+    plans = twoArcPath(x, y, phi)
+    print(fstr(plans))
+    lengths = []
+    for plan in plans:
+        lengths.append(plan[0]['length'] + plan[1]['length'])
+    return plans[0] if lengths[0] < lengths[1] else plans[1]
+
+def twoArcPath(x, y, phi):
+    # returns path plans for two intersecting arcs.
+    phi = (phi + pi) % (2.0 * pi) - pi
     # see ccw path
-    path = ccwPath(phi, x, y)
-    if path['gamma'] < 0.0 or path['beta'] < 0.0:
-        # try a clockwise rotation
-        path = ccwPath(-phi, x, -y)
-        if path['gamma'] < 0.0 or path['beta'] < 0.0:
-            # solution requires two circles of same rotation, which we do not support
-            return None
-        path['beta'] *= -1
-        path['e'][1] *= -1
-    # calculate the motion plan
-    if path:
+    paths = (ccwPath(phi, x, y),ccwPath(-phi, x, -y))
+    paths[1]['beta'] *= -1
+    paths[1]['e'][1] *= -1
+
+    plans = []
+    for path in paths:            
         first_arc = {
             'start': (0.0, 0.0, 0.0),
             'end': (path['e'][0], path['e'][1], path['beta']),
@@ -269,30 +276,29 @@ def nearPath(x, y, phi):
             'angle': -math.copysign(path['gamma'], path['beta']),
             'length': abs(path['rho'] * path['gamma'])
         }
-        motion_plan = [first_arc, second_arc]
-    else:
-        motion_plan = None
+        plans.append((first_arc, second_arc))
+    return plans
 
-    return motion_plan
-
-def b_to_w(base_pose, dx):
+def b_to_w(base_pose, dwheel):
     # given the base pose, return the wheel pose
     theta = base_pose[2]
     return [
-        base_pose[0] + dx * math.cos(theta),
-        base_pose[1] + dx * math.sin(theta),
+        base_pose[0] + dwheel * cos(theta),
+        base_pose[1] + dwheel * sin(theta),
         theta
     ]
 
-def w_to_b(wheel_pose, dx):
+def w_to_b(wheel_pose, dwheel):
     theta = wheel_pose[2]
     return [
-        wheel_pose[0] - dx * math.cos(theta),
-        wheel_pose[1] - dx * math.sin(theta),
+        wheel_pose[0] - dwheel * cos(theta),
+        wheel_pose[1] - dwheel * sin(theta),
         theta
     ]
 
 def lrEstimate(path, lr_model, start_twist, dt=0.025, left0 = 0.0, right0 = 0.0):
+    # TODO: not working 2020-09-29
+    print(fstr(path))
     # estimate robot left, right values to achieve a certain path, stopping with zero twist
     (pxl, pxr, fx) = lr_model[0]
     (pol, por, fo) = lr_model[2]
@@ -374,6 +380,24 @@ def default_lr_model():
     fo = 8.464
     return ((pxl, pxr, fx), (pyl, pyr, fy), (pol, por, fo))
 
+class Motor:
+        # return motor left, right for a given speed, rotation
+        # See RKJ 2020-09-14 pp 25
+    def __init__(self, lr_model=default_lr_model()):
+        pxl, pxr, fx = lr_model[0]
+        pol, por, fo = lr_model[2]
+        self.a = pxl / fx
+        self.b = pxr / fx
+        self.c = pol / fo
+        self.d = por / fo
+        self.denom_left = self.b * self.d - self.a * self.c
+        self.denom_right = self.b * self.c - self.a * self.d
+
+    def __call__(self, v, omega):
+        left = (v * self.d - omega * self.b) / self.denom_left
+        right = (v * self.c - omega * self.a) / self.denom_right
+        return (left, right)
+
 def dynamic_motion(lrs, start_pose=None, start_twist=None, lr_model=None):
     # apply the dynamic model in lr_model to the (left, right) values in lrs
     # model is in what we will call here 'base' frame of robot
@@ -392,8 +416,8 @@ def dynamic_motion(lrs, start_pose=None, start_twist=None, lr_model=None):
     (xb, yb, thetab) = start_pose
 
     # robot frame velocities
-    vxr = math.cos(thetab) * vxb + math.sin(thetab) * vyb
-    vyr = -math.sin(thetab) * vxb + math.cos(thetab) * vyb
+    vxr = cos(thetab) * vxb + sin(thetab) * vyb
+    vyr = -sin(thetab) * vxb + cos(thetab) * vyb
 
     t = lrs[0]['t']
     path = [{'t': t, 'pose': (xb, yb, thetab), 'twist': (vxb, vyb, omegab)}]
@@ -408,14 +432,14 @@ def dynamic_motion(lrs, start_pose=None, start_twist=None, lr_model=None):
         omegabOld = omegab
         omegab += dt * (left * pol + right * por - fo * omegab)
 
-        vxbOld = math.cos(thetab) * vxr - math.sin(thetab) * vyr
-        vybOld = math.sin(thetab) * vxr + math.cos(thetab) * vyr
+        vxbOld = cos(thetab) * vxr - sin(thetab) * vyr
+        vybOld = sin(thetab) * vxr + cos(thetab) * vyr
         thetab += dt * 0.5 * (omegab + omegabOld)
 
         vxr += dt * (left * pxl + right * pxr - fx * vxr)
         vyr += dt * (left * pyl + right * pyr - fy * vyr)
-        vxb = math.cos(thetab) * vxr - math.sin(thetab) * vyr
-        vyb = math.sin(thetab) * vxr + math.cos(thetab) * vyr
+        vxb = cos(thetab) * vxr - sin(thetab) * vyr
+        vyb = sin(thetab) * vxr + cos(thetab) * vyr
 
         # integrate using previous values for pose
         xb += dt * 0.5 * (vxb + vxbOld)
@@ -424,3 +448,87 @@ def dynamic_motion(lrs, start_pose=None, start_twist=None, lr_model=None):
         path.append([{'t': t, 'pose': (xb, yb, thetab), 'twist': (vxb, vyb, omegab)}])
         #print(fstr({'t': t, 'xb': xb, 'yb': yb, 'theta': thetab, 'left': left, 'right': right, 'vxr': vxr, 'vyr': vyr, 'vxb': vxb, 'vyb': vyb, 'omegab': omegab}))
     return path
+
+def nearestLinePoint(start, end, point):
+    # The nearest point on line segment start, end to point p
+    # adapted from https://forum.unity.com/threads/how-do-i-find-the-closest-point-on-a-line.340058/
+
+    # return the nearest point, and the fraction of distance from start to end of the point
+    if start[0] == end[0] and start[1] == end[1]:
+        return (start, 0.0)
+    
+    normSE = sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)
+    lineDir = ((end[0] - start[0]) / normSE, (end[1] - start[1]) / normSE)
+    v = (point[0] - start[0], point[1] - start[1])
+    d = v[0] * lineDir[0] + v[1] * lineDir[1]
+    if d <= 0.0:
+        return 0.0, start
+    elif d > normSE:
+        return 1.0, end
+    else:
+        c = start[0] + d * lineDir[0], start[1] + d * lineDir[1]
+        return d / normSE, c
+
+def nearestArcPoint(center, rho, thetaStart, alpha, point):
+    #print(fstr((center, rho, thetaStart, alpha, point)))
+    # returns the fraction along an arc, and the closest point on that arc,
+    # to a point "point" Arc has center with radius rho, beginning
+    # angle (relative to x-axis) of thetaStart
+    # negative alpha means clockwise arc direction
+    # See RKJ 2020-09-28 pp 40
+
+    # constrain alpha to -2pi -> + 2pi. Negative angle means CW rotation through arc
+    if alpha > 0.0:
+        alpha = (alpha + TWOPI) % TWOPI
+    else:
+        alpha = - ((-alpha + TWOPI) % TWOPI)
+
+    if (point[0] == center[0] and point[1] == center[1]) or alpha == 0.0:
+        fraction = 0.0
+    else:
+        thetaEnd = thetaStart + alpha
+        gamma = thetaStart + 0.5 * alpha
+        beta = atan2(point[1] - center[1], point[0] - center[0])
+        betaPrime = (beta - gamma + pi) % TWOPI - pi
+        fractionPrime = betaPrime / alpha
+        if fractionPrime > 0.5:
+            fraction = 1.0
+            thetaI = thetaEnd
+        elif fractionPrime < -0.5:
+            fraction = 0.0
+            thetaI = thetaStart
+        else:
+            fraction = fractionPrime + 0.5
+            thetaI = thetaStart + fraction * alpha
+
+        closest = (center[0] + rho * cos(thetaI), center[1] + rho * sin(thetaI))
+        #print(fstr({'betaprime':betaPrime, 'beta': beta, 'gamma': gamma, 'fraction': fraction, 'closest': closest}))
+
+    return (fraction, closest)
+
+def transform2d(poseA, frameA, frameB):
+    # transform poseA from frameA to frameC.
+    # See RKJ 2020-10-1 pp 42-43
+
+    # these are in world frame M
+    (AxM, AyM, AthetaM) = frameA
+    (BxM, ByM, BthetaM) = frameB
+
+    # input pose is in frame A
+    (xA, yA, thetaA) = poseA
+
+    # transform B origin from world frame M to A
+
+    BxA = (BxM - AxM) * cos(AthetaM) + (ByM - AyM) * sin(AthetaM)
+    ByA = (ByM - AyM) * cos(AthetaM) -(BxM - AxM) * sin(AthetaM)
+
+    # translate point from A-relative to B-relative in A orientation
+    xAB = xA - BxA
+    yAB = yA - ByA
+
+    # rotate point to B orientation
+    theta = BthetaM - AthetaM
+    xB = xAB * cos(theta) + yAB * sin(theta)
+    yB = yAB * cos(theta) - xAB * sin(theta)
+    thetaB = thetaA - theta
+    return (xB, yB, thetaB) 
