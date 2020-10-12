@@ -1,10 +1,11 @@
 # Common geometry methods
 
 import tf
+from tf.transformations import euler_from_quaternion, quaternion_from_euler
 import math
-from math import sin, cos, pi, sqrt, atan2
+from math import sin, cos, pi, sqrt, atan2, copysign
 import rospy
-from geometry_msgs.msg import Quaternion, PoseStamped, PointStamped
+from geometry_msgs.msg import Quaternion, PoseStamped, PointStamped, Pose
 from bdbd_common.utils import fstr
 
 D_TO_R = pi / 180. # degrees to radians
@@ -74,6 +75,7 @@ def rotationCenter(frame, vx, vy, omega):
     return center
 
 def threeSegmentPath( x, y, phi, rho):
+    #print(fstr({'x': x, 'y': y, 'phi': phi, 'rho': rho}))
     '''
         shortest path from (0, 0) to a point at (x, y), with ending orientation phi from current
         orientation. Travel in either straight lines, or on circles of radius rho.
@@ -160,8 +162,9 @@ def threeSegmentPath( x, y, phi, rho):
                 solutions.append(solution)
 
     # determine the best solution
+    for solution in solutions:
+        print(fstr(solution))
     solution = solutions[0]
-    #print(fstr(solution))
     for i in range(1, len(solutions)):
         #print(fstr(solutions[i]))
         if solutions[i]['length'] < solution['length']:
@@ -170,24 +173,27 @@ def threeSegmentPath( x, y, phi, rho):
     # return a path plan
     first_arc = {
         'start': (0.0, 0.0, 0.0),
-        'end': (solution['E'][0], solution['E'][1], solution['beta']),
+        'end': (solution['E'][0], solution['E'][1], solution['beta'] * solution['dir'][0]),
         'center': sc_ccw if solution['dir'][0] == 1 else sc_cw,
         'radius': rho,
         'angle': solution['beta'] * solution['dir'][0],
-        'length': solution['l0']
+        'length': solution['l0'],
+        'kappa': solution['dir'][0] / rho, 
     }
     second_segment = {
         'start': first_arc['end'],
-        'end': (solution['F'][0], solution['F'][1], solution['beta']),
-        'length': solution['l1']
+        'end': (solution['F'][0], solution['F'][1], solution['beta'] * solution['dir'][0]),
+        'length': solution['l1'],
+        'kappa': 0.0
     }
     third_arc = {
         'start': second_segment['end'],
-        'end': (x, y, (phi + pi) % (2.0 * pi) - pi),
+        'end': (x, y, second_segment['end'][2] + solution['gamma'] * solution['dir'][1]),
         'center': fc_ccw if solution['dir'][1] == 1 else fc_cw,
         'radius': rho,
         'angle': solution['gamma'] *  solution['dir'][1],
-        'length': solution['l2']
+        'length': solution['l2'],
+        'kappa': solution['dir'][1] / rho
     }
 
     motion_plan = []
@@ -244,7 +250,7 @@ def ccwPath(phi, x, y):
 def nearPath(x, y, phi):
     # compatibility-mostly: return the shortest twoArcPlan
     plans = twoArcPath(x, y, phi)
-    print(fstr(plans))
+    #print(fstr(plans))
     lengths = []
     for plan in plans:
         lengths.append(plan[0]['length'] + plan[1]['length'])
@@ -259,23 +265,28 @@ def twoArcPath(x, y, phi):
     paths[1]['e'][1] *= -1
 
     plans = []
-    for path in paths:            
+    for path in paths:
+        dir = 1.0 if path['beta'] > 0.0 else -1.0
         first_arc = {
             'start': (0.0, 0.0, 0.0),
             'end': (path['e'][0], path['e'][1], path['beta']),
-            'center': (0.0, math.copysign(path['rho'], path['beta'])),
+            'center': (0.0, dir * path['rho']),
             'radius': path['rho'],
             'angle': path['beta'],
-            'length': abs(path['beta'] * path['rho'])
+            'length': abs(path['beta'] * path['rho']),
+            'kappa': dir * (1. / path['rho'])
         }
         second_arc = {
             'start': first_arc['end'],
             'end': (x, y, phi),
-            'center': (path['a'], path['rho'] - path['b']),
+            'center': (path['a'], dir * (path['rho'] - path['b'])),
             'radius': path['rho'],
-            'angle': -math.copysign(path['gamma'], path['beta']),
-            'length': abs(path['rho'] * path['gamma'])
+            'angle': -dir * path['gamma'],
+            'length': abs(path['rho'] * path['gamma']),
+            'kappa': -dir * (1. / path['rho'])
         }
+        print(fstr(first_arc))
+        print(fstr(second_arc))
         plans.append((first_arc, second_arc))
     return plans
 
@@ -327,7 +338,7 @@ def lrEstimate(path, lr_model, start_twist, dt=0.025, left0 = 0.0, right0 = 0.0)
     # create an initial guess of left and right motors
 
     v_1 = vhat / (1. + vhat/(rho * omegahat))
-    o_1 = math.copysign(v_1 / rho, beta)
+    o_1 = copysign(v_1 / rho, beta)
     o_2 = -o_1
     #print(fstr({'v_1': v_1, 'o_1': o_1, 'o_2:': o_2}))
 
@@ -383,7 +394,7 @@ def default_lr_model():
 class Motor:
         # return motor left, right for a given speed, rotation
         # See RKJ 2020-09-14 pp 25
-    def __init__(self, lr_model=default_lr_model()):
+    def __init__(self, lr_model=default_lr_model(), mmax = 1.0):
         pxl, pxr, fx = lr_model[0]
         pol, por, fo = lr_model[2]
         self.a = pxl / fx
@@ -392,11 +403,18 @@ class Motor:
         self.d = por / fo
         self.denom_left = self.b * self.d - self.a * self.c
         self.denom_right = self.b * self.c - self.a * self.d
+        self.mmax = mmax
 
     def __call__(self, v, omega):
         left = (v * self.d - omega * self.b) / self.denom_left
         right = (v * self.c - omega * self.a) / self.denom_right
-        return (left, right)
+    
+        scale = 1.0
+        if abs(left) > self.mmax:
+            scale = abs(left / self.mmax)
+        if abs(right) > self.mmax:
+            scale = max(scale, abs(right / self.mmax))
+        return (left / scale, right / scale)
 
 def dynamic_motion(lrs, start_pose=None, start_twist=None, lr_model=None):
     # apply the dynamic model in lr_model to the (left, right) values in lrs
@@ -485,6 +503,7 @@ def nearestArcPoint(center, rho, thetaStart, alpha, point):
 
     if (point[0] == center[0] and point[1] == center[1]) or alpha == 0.0:
         fraction = 0.0
+        thetaI = thetaStart
     else:
         thetaEnd = thetaStart + alpha
         gamma = thetaStart + 0.5 * alpha
@@ -501,9 +520,7 @@ def nearestArcPoint(center, rho, thetaStart, alpha, point):
             fraction = fractionPrime + 0.5
             thetaI = thetaStart + fraction * alpha
 
-        closest = (center[0] + rho * cos(thetaI), center[1] + rho * sin(thetaI))
-        #print(fstr({'betaprime':betaPrime, 'beta': beta, 'gamma': gamma, 'fraction': fraction, 'closest': closest}))
-
+    closest = (center[0] + rho * cos(thetaI), center[1] + rho * sin(thetaI))
     return (fraction, closest)
 
 def transform2d(poseA, frameA, frameB):
@@ -532,3 +549,49 @@ def transform2d(poseA, frameA, frameB):
     yB = yAB * cos(theta) - xAB * sin(theta)
     thetaB = thetaA - theta
     return (xB, yB, thetaB) 
+
+def pose2to3(pose2d):
+    # convert a 2d pose (x, y, theta) to a Pose message
+    pose3d = Pose()
+    pose3d.position.x = pose2d[0]
+    pose3d.position.y = pose2d[1]
+    pose3d.orientation = array_to_q(quaternion_from_euler(0.0, 0.0, pose2d[2]))
+    return pose3d
+
+def pose3to2(pose3d):
+    # convert 3D Pose message to 2D coordinates x, y, theta.
+    theta = euler_from_quaternion(q_to_array(pose3d.orientation))[2]
+    pose2d = (pose3d.position.x, pose3d.position.y, theta)
+    return pose2d
+
+class DynamicStep:
+    # simple dynamic model of bdbd motion
+    def __init__(self, lr_model=default_lr_model()):
+        self.lr_model = lr_model
+
+    def __call__(self, lr, dt, pose_m, twist_m):
+        # apply lr=(left, right) over time dt, starting from pose=(x, y, theta) and twist=(vx, vy, omega)
+        (x_m, y_m, theta_m) = pose_m
+        (vx_m, vy_m, omega) = twist_m
+        (left, right) = lr
+
+        (pxl, pxr, fx) = self.lr_model[0]
+        (pyl, pyr, fy) = self.lr_model[1]
+        (pol, por, fo) = self.lr_model[2]
+
+        # robot frame velocities
+        vx_r = cos(theta_m) * vx_m + sin(theta_m) * vy_m
+        vy_r = -sin(theta_m) * vx_m + cos(theta_m) * vy_m
+
+        # dynamic model in robot coordinates
+        omegaNew = omega + dt * (left * pol + right * por - fo * omega)
+        vxNew_r = vx_r + dt * (left * pxl + right * pxr - fx * vx_r)
+        vyNew_r = vy_r + dt * (left * pyl + right * pyr - fy * vy_r)
+
+        # map (or base) coordinate values
+        thetaNew_m = theta_m + dt * 0.5 * (omega + omegaNew)
+        vxNew_m = cos(thetaNew_m) * vxNew_r - sin(thetaNew_m) * vyNew_r
+        vyNew_m = sin(thetaNew_m) * vxNew_r + cos(thetaNew_m) * vyNew_r
+        xNew_m = x_m + dt * 0.5 * (vx_m + vxNew_m)
+        yNew_m = y_m + dt * 0.5 * (vy_m + vyNew_m)
+        return ((xNew_m, yNew_m, thetaNew_m), (vxNew_m, vyNew_m, omegaNew), (vx_r, vy_r, omegaNew))
