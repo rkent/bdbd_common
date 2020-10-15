@@ -28,10 +28,10 @@ class PathPlan():
         min_rho=0.05, # the smallest radius we allow in a path plan,
         rhohat=0.184,  # tradeoff between speed and omega, see RKJ 2020-09-23 p 33
         # control model parameters
-        Cd=250.,
-        Cp=2000.,
-        Cj=16.0,
-        Fp=4.0,
+        Cd=125.,
+        Cp=1000.,
+        Cj=0.0,
+        Fp=1.0,
         Fd=0.0
     ):
         self.s_plan = None
@@ -40,6 +40,12 @@ class PathPlan():
         self.approach_rho = approach_rho
         self.min_rho = min_rho
         self.rhohat = rhohat
+        self.v_new = 0.0
+        self.o_new = 0.0
+        self.lp_frac = 0.0
+        self.dy_w = None
+        self.psi = None
+        self.kappamax = 1. / min_rho
 
         # parameters for the control model. See RKJ 2020-10-07 p 47
         self.Cd = Cd # sin(angle) to plan factor
@@ -75,7 +81,7 @@ class PathPlan():
         self.frame_m = (0., 0., 0.) # this is the privileged frame that others are relative to
         self.start_m = pose3to2(start_pose)
         self.end_m = pose3to2(end_pose)
-
+            
         # at the start, the robot base is at start_m, so that is the origin of the robot frame
         self.wheelstart_m = transform2d(self.wheel_r, self.start_m, self.frame_m)
 
@@ -88,6 +94,10 @@ class PathPlan():
         #print(fstr({'start_m': self.start_m, 'end_m': self.end_m, 'wheelstart_m': self.wheelstart_m, 'wheelend_m': self.wheelend_m}))
         self.end_p = transform2d(self.wheelend_m, self.frame_m, self.frame_p)
 
+        if self.start_m[0] == self.end_m[0] and self.start_m[1] == self.end_m[1] and self.start_m[2] == self.end_m[2]:
+            # null request
+            return ()
+
         # select the best two segment solution, if it exists
         paths2a = twoArcPath(*self.end_p)
         path2a = None
@@ -97,7 +107,7 @@ class PathPlan():
                 if path2a is None or (p[0]['radius'] > self.min_rho and p[0]['radius'] < path2a[0]['radius']):
                     path2a = p
 
-        path3a = threeSegmentPath(*self.end_p, self.approach_rho)
+        path3a = threeSegmentPath(self.end_p[0], self.end_p[1], self.end_p[2], self.approach_rho)
 
         if path2a and (
              path2a[0]['radius'] > self.min_rho and path2a[0]['radius'] < self.approach_rho
@@ -321,7 +331,8 @@ class PathPlan():
                     wheel_pose_p[:2])
             # note nearest
             nearestPoint_p = (
-                *nearestPoint,
+                nearestPoint[0],
+                nearestPoint[1],
                 (segment['start'][2] + fraction * (segment['end'][2] - segment['start'][2]))
             )
             nearests.append((fraction, nearestPoint_p, segment['kappa']))
@@ -368,6 +379,9 @@ class PathPlan():
         return (best_nearest_p, best_distance, vhat, best_kappa, lprime, lprime_sum)
 
     def controlStep(self, dt, pose_m, twist_r):
+        if dt < 0.0001:
+            return (self.v_new, self.o_new)
+
         ### control model
         # get the wheel plan coordinates given the base coordinates. The base coordinates
         # are the origin of the robot frame, and we have the wheels position in that frame.
@@ -394,7 +408,7 @@ class PathPlan():
         dsinpdt = (sinp - self.sinpold) / dt
         self.sinpold = sinp
 
-        # when we are near the end, use more actual kappa
+        # when we are near the end, use more actual kappa. This prevents rapid change between kappas if there are two nearby arcs at end.
         diff = lprime_sum - lprime
         a_p_ratio = max(0.0 , (self.lpclose - diff) / self.lpclose)
 
@@ -410,6 +424,7 @@ class PathPlan():
 
         kappa_new = a_p_ratio * kappaa + (1.0 - a_p_ratio)* kappa_near -\
             self.Cp * dy_w - self.Cd * math.sin(psi) - self.Cj * dsinpdt
+        kappa_new = min(self.kappamax, max(-self.kappamax, kappa_new))
         '''
         print(fstr({'a_p_ratio': a_p_ratio, 'kappaa': kappaa, 'kappa_near': kappa_near, 
             'Cp': self.Cp, 'dy_w': dy_w, 'Cd': self.Cd, 'psi': psi,
@@ -424,7 +439,6 @@ class PathPlan():
         v_new = vhat_new / (1.0 + abs(self.rhohat * kappa_new))
         o_new = kappa_new * v_new
 
-        # saved for debugging only
         self.nearest_p = nearest_p
         self.wheel_pose_p = wheel_pose_p
         self.wheel_pose_m = wheel_pose_m
@@ -435,8 +449,13 @@ class PathPlan():
         self.ev = ev
         self.vhat_new = vhat_new
         self.vhat_near = vhat_near
+        self.vhat_plan = vhat_plan
+        self.o_new = o_new
+        self.v_new = v_new
         self.vhata = vhata
         self.kappaa = kappaa
         self.kappa_new = kappa_new
-
+        self.kappa_near = kappa_near
+        self.lp_frac = lp_frac
+        self.dsinpdt = dsinpdt
         return (v_new, o_new)
