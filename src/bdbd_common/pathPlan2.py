@@ -420,8 +420,11 @@ class PathPlan():
         self.dyold = dy_r
 
         vhat_plan = near_wheel['vhat']
+    
+        denom = va + near_wheel['v']
+        kappa_combo = (oa + near_wheel['omega']) / denom if denom != 0.0 else 0.0
 
-        kappa_new = kappaa + \
+        kappa_new = kappa_combo + \
             -self.Cp * dy_r - self.Cd * math.sin(psi) -  self.Cy * dydt - self.Cj * dsinpdt
 
         kappa_new = min(self.kappamax, max(-self.kappamax, kappa_new))
@@ -448,6 +451,8 @@ class PathPlan():
         self.vhata = vhata
         self.kappaa = kappaa
         self.kappa_new = kappa_new
+        self.kappa_combo = kappa_combo
+        self.kappa_plan = near_wheel['omega'] / near_wheel['v'] if near_wheel['v'] != 0.0 else 0.0
         self.dsinpdt = dsinpdt
         self.dydt = dydt
         return (v_new, o_new)
