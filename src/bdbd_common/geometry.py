@@ -75,7 +75,7 @@ def rotationCenter(frame, vx, vy, omega):
     return center
 
 def threeSegmentPath( x, y, phi, rho):
-    #print(fstr({'x': x, 'y': y, 'phi': phi, 'rho': rho}))
+    #print('threeSegmentPath: ' + fstr({'x': x, 'y': y, 'phi': phi, 'rho': rho},'8.5f'))
     '''
         shortest path from (0, 0) to a point at (x, y), with ending orientation phi from current
         orientation. Travel in either straight lines, or on circles of radius rho.
@@ -162,8 +162,8 @@ def threeSegmentPath( x, y, phi, rho):
                 solutions.append(solution)
 
     # determine the best solution
-    for solution in solutions:
-        print(fstr(solution))
+    #for solution in solutions:
+    #    print(fstr(solution))
     solution = solutions[0]
     for i in range(1, len(solutions)):
         #print(fstr(solutions[i]))
@@ -208,7 +208,10 @@ def threeSegmentPath( x, y, phi, rho):
 
     if third_arc['angle'] != 0.0:
         motion_plan.append(third_arc)
-       
+
+    #print('1 of 3 segments: ' + fstr(first_arc,'8.5f'))
+    #print('2 of 3 segments: ' + fstr(second_segment,'8.5f'))
+    #print('3 of 3 segments: ' + fstr(third_arc,'8.5f'))
     return motion_plan
 
 def ccwPath(phi, x, y):
@@ -257,6 +260,7 @@ def nearPath(x, y, phi):
     return plans[0] if lengths[0] < lengths[1] else plans[1]
 
 def twoArcPath(x, y, phi):
+    #print('twoArcPath:\n' + fstr({'x': x, 'y': y, 'phi':phi}))
     # returns path plans for two intersecting arcs.
     phi = (phi + pi) % (2.0 * pi) - pi
     # see ccw path
@@ -285,8 +289,8 @@ def twoArcPath(x, y, phi):
             'length': abs(path['rho'] * path['gamma']),
             'kappa': -dir * (1. / path['rho'])
         }
-        print(fstr(first_arc))
-        print(fstr(second_arc))
+        #print(fstr({'1 of 2 arcs': first_arc}))
+        #print(fstr({'2 of 2 arcs': second_arc}))
         plans.append((first_arc, second_arc))
     return plans
 

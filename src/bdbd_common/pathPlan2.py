@@ -29,11 +29,12 @@ class PathPlan():
         min_rho=0.05, # the smallest radius we allow in a path plan,
         rhohat=0.184,  # tradeoff between speed and omega, see RKJ 2020-09-23 p 33
         # control model parameters
-        Cp=500.,
-        Cd=00.,
-        Cy=100.,
-        Cj=0.0,
-        Fp=1.0,
+        Cp=125.,
+        Cd=20.,
+        Cy=20.,
+        Cj=5.0,
+        Cyf=0.25,
+        Fp=0.25,
         Fd=0.0
     ):
         self.s_plan = None
@@ -49,12 +50,14 @@ class PathPlan():
         self.psi = None
         self.kappamax = 1. / min_rho
         self.lastt = 0.0
+        self.vhatmin = -0.1
 
         # parameters for the control model. See RKJ 2020-10-07 p 47
         self.Cd = Cd # sin(angle) to plan factor
         self.Cp = Cp # distance to plan factor
         self.Cj = Cj # rate of change of sin(angle) to plan factor
         self.Cy = Cy
+        self.Cyf = Cyf
         self.Fp = Fp # velocity factor
         self.Fd = Fd # rate of change of velocity factor
         # parameters rarely changed
@@ -64,6 +67,7 @@ class PathPlan():
         self.sinpold = 0.0
         self.tt = 0.0
         self.dyold = 0.0
+        self.dydt_old = 0.0
 
         # the offset from lr_model base of zero-vy center of rotation RKJ 2020-09-30 p 41
         (pyl, pyr, fy) = self.lr_model[1]
@@ -76,6 +80,7 @@ class PathPlan():
         self.robot_w = (self.dwheel, 0.0, 0.0)
 
     def start(self, start_pose, end_pose):
+        print(fstr({'\nstart_pose': start_pose, '\nend_pose': end_pose}))
         # develop a path plan from start_pose to end_pose (as Pose message format)
         self.start_pose = start_pose
         self.end_pose = end_pose
@@ -424,8 +429,10 @@ class PathPlan():
         sinp = math.sin(psi)
         dsinpdt = (sinp - self.sinpold) / dt
         self.sinpold = sinp
-        dydt = (dy_r - self.dyold) / dt
+        dydt_new = (dy_r - self.dyold) / dt
         self.dyold = dy_r
+        dydt = self.Cyf * dydt_new + (1. - self.Cyf) * self.dydt_old
+        self.dydt_old = dydt
 
         vhat_plan = near_wheel['vhat']
     
@@ -440,12 +447,13 @@ class PathPlan():
         ev = vhata - vhat_plan
         devdt = (ev - self.evold) / dt
         self.evold = ev
-        vhat_new = max(0.0, vhat_plan - self.Fp * ev - self.Fd * devdt)
+        vhat_new = max(self.vhatmin, vhat_plan - self.Fp * ev - self.Fd * devdt)
 
         v_new = vhat_new / (1.0 + abs(self.rhohat * kappa_new))
         o_new = kappa_new * v_new
 
         self.near_wheel_p = near_wheel_p
+        self.near_robot_m = near_robot_m
         self.pose_p = pose_p
         self.dy_r = dy_r
         self.va = va
