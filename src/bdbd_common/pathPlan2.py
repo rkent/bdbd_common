@@ -273,7 +273,7 @@ class PathPlan():
             seg = self.path[i]
             lprime = seg['lprime']
 
-            if sprime_sum + lprime > sprime:
+            if sprime_sum + lprime > sprime and v is None:
                 # this is the correct segment
                 frac = (sprime - sprime_sum) / lprime
                 rho = seg['radius'] if 'radius' in seg else None
@@ -296,10 +296,8 @@ class PathPlan():
                         by = seg['center'][1] + rho * math.cos(theta)
     
                 p = (bx, by, theta)
-                break
-            else:
-                sprime_sum += lprime
-                s_sum += seg['length']
+            sprime_sum += lprime
+            s_sum += seg['length']
 
         if v is None:
             p = self.path[-1]['end']
@@ -312,7 +310,17 @@ class PathPlan():
                 omega = 0.0
                 rho = None
             
-        return {'time': tend, 'sprime': sprime, 'vhat': vhat, 'v': v, 'omega': omega, 'rho': rho, 'point': p, 'd_vhat_dt': d_vhat_dt}
+        return {
+            'time': tend,
+            'sprime': sprime,
+            'vhat': vhat,
+            'v': v,
+            'omega': omega,
+            'rho': rho,
+            'point': p,
+            'd_vhat_dt': d_vhat_dt,
+            'fraction': sprime / sprime_sum if sprime_sum != 0.0 else 0.0
+        }
 
     def nearestPlanPoint(self, wheel_pose_p):
         # find closest point on plan
@@ -455,6 +463,7 @@ class PathPlan():
         self.kappa_plan = near_wheel['omega'] / near_wheel['v'] if near_wheel['v'] != 0.0 else 0.0
         self.dsinpdt = dsinpdt
         self.dydt = dydt
+        self.lp_frac = near_wheel['fraction']
         return (v_new, o_new)
 
     def nextPlanPoint(self, dt, pose_p):
@@ -478,8 +487,8 @@ class PathPlan():
         d0 = distance(pose_p, pp0)
         d1 = distance(pose_p, pp1)
         d2 = distance(pose_p, pp2)
-        print(fstr((pose_p, self.v(t0), d0, d1, d2), fmat='8.5f'))
-        print(fstr((t0, pp0, t1, pp1, t2, pp2), fmat='8.5f'))
+        #print(fstr((pose_p, self.v(t0), d0, d1, d2), fmat='8.5f'))
+        #print(fstr((t0, pp0, t1, pp1, t2, pp2), fmat='8.5f'))
         deriv2 = d0 + d2 - 2.0 * d1 # proportional to second derivative
         if deriv2 <= 0.0:
             # this is a maximum, just pick the smallest edge. 0.0 is t0, 2.0 is t2
