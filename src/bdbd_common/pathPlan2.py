@@ -1,5 +1,5 @@
 from bdbd_common.geometry import threeSegmentPath, twoArcPath, HALFPI, TWOPI, \
-    default_lr_model, pose3to2, nearestLinePoint, nearestArcPoint, transform2d
+    default_lr_model, pose3to2, nearestLinePoint, nearestArcPoint, transform2d, lr_est
 
 from bdbd_common.utils import fstr
 import math
@@ -78,6 +78,7 @@ class PathPlan():
         self.wheel_r = (-self.dwheel, 0.0, 0.0)
         # the robot base (measurement point) relative to the center of rotation
         self.robot_w = (self.dwheel, 0.0, 0.0)
+        self.frame_m = (0., 0., 0.) # this is the privileged frame that others are relative to
 
     def start(self, start_pose, end_pose):
         print(fstr({'\nstart_pose': start_pose, '\nend_pose': end_pose}))
@@ -87,9 +88,13 @@ class PathPlan():
 
         # convert to 2D coordinates x, y, theta. The pose coordinates are in the frame which will
         # be considered the base frame for these calculations.
-        self.frame_m = (0., 0., 0.) # this is the privileged frame that others are relative to
-        self.start_m = pose3to2(start_pose)
-        self.end_m = pose3to2(end_pose)
+        start_m = pose3to2(start_pose)
+        end_m = pose3to2(end_pose)
+        return self.start2(start_m, end_m)
+
+    def start2(self, start_m, end_m):
+        self.start_m = start_m
+        self.end_m = end_m
             
         # at the start, the robot base is at start_m, so that is the origin of the robot frame
         self.wheelstart_m = transform2d(self.wheel_r, self.start_m, self.frame_m)
@@ -107,6 +112,7 @@ class PathPlan():
             # null request
             return ()
 
+        # determine a path plan given 2d coordinates
         # select the best two segment solution, if it exists
         paths2a = twoArcPath(*self.end_p)
         path2a = None
@@ -282,6 +288,7 @@ class PathPlan():
                 # this is the correct segment
                 frac = (sprime - sprime_sum) / lprime
                 rho = seg['radius'] if 'radius' in seg else None
+                kappa = seg['kappa']
                 if rho is None:
                     v = vhat
                     omega = 0.0
@@ -306,6 +313,7 @@ class PathPlan():
 
         if v is None:
             p = self.path[-1]['end']
+            kappa = self.path[-1]['kappa']
             if 'radius' in self.path[-1]:
                 rho = self.path[-1]['radius']
                 v = vhat * rho / (rho + self.rhohat)
@@ -322,6 +330,7 @@ class PathPlan():
             'v': v,
             'omega': omega,
             'rho': rho,
+            'kappa': kappa,
             'point': p,
             'd_vhat_dt': d_vhat_dt,
             'fraction': sprime / sprime_sum if sprime_sum != 0.0 else 0.0
@@ -509,9 +518,35 @@ class PathPlan():
         return self.v(tt)
 
 if __name__ == '__main__':
-    from bdbd_common.geometry import pose2to3
-    from bdbd_common.utils import fstr
+    from bdbd_common.geometry import Motor
     pp = PathPlan()
-    sp = pp.start(pose2to3((0., 0., 0.)), pose2to3((.2, .1, 0.)))
-    for seg in sp:
+    pathPlan = pp.start2((0., 0., 0.), (.3, .1, 0.))
+    for seg in pathPlan:
         print(fstr(seg))
+    
+    speedPlan = pp.speedPlan(0.0, 0.25, 0.0)
+    for seg in speedPlan:
+        print(fstr(seg))
+
+    dt = 0.02
+    frac = 0.0
+    tt = 0.0
+    vps = []
+    while frac < 0.999:
+        vp = pp.v(tt)
+        vps.append(vp)
+        print(fstr(vp))
+        frac = vp['fraction']
+        tt += dt
+
+    last_vx = 0.0
+    last_omega = 0.0
+
+    motor = Motor()
+    tt = 0.0
+    for vp in vps:
+        (lm, rm) = motor(vp['v'], vp['omega'])
+        (left, right, last_vx, last_omega) = lr_est(vp['v'], vp['omega'], last_vx, last_omega, dt)
+        print(fstr({'tt': tt, 'lr': (left, right), 'lm': (lm, rm), 'last_vx': last_vx, 'last_omega': last_omega}))
+        tt += dt
+

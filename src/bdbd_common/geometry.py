@@ -313,7 +313,10 @@ def w_to_b(wheel_pose, dwheel):
 
 def lrEstimate(path, lr_model, start_twist, dt=0.025, left0 = 0.0, right0 = 0.0):
     # TODO: not working 2020-09-29
+<<<<<<< HEAD
     print(fstr(path))
+=======
+>>>>>>> ubutower
     # estimate robot left, right values to achieve a certain path, stopping with zero twist
     (pxl, pxr, fx) = lr_model[0]
     (pol, por, fo) = lr_model[2]
@@ -599,3 +602,33 @@ class DynamicStep:
         xNew_m = x_m + dt * 0.5 * (vx_m + vxNew_m)
         yNew_m = y_m + dt * 0.5 * (vy_m + vyNew_m)
         return ((xNew_m, yNew_m, thetaNew_m), (vxNew_m, vyNew_m, omegaNew), (vx_r, vy_r, omegaNew))
+
+def lr_est(vx, omega, last_vx, last_omega, dt, lr_model=default_lr_model(), mmax=1.0):
+    # estimate values for left, right using the dymanic model with limits
+    (pxl, pxr, fx) = lr_model[0]
+    (pol, por, fo) = lr_model[2]
+
+    delx = (vx - last_vx * (1.0 - dt * fx)) / dt
+    #print('delx: {}'.format(delx))
+    delo = (omega - last_omega * (1. - dt * fo)) / dt
+    right = (pol * delx - pxl * delo) / (pol * pxr - pxl * por)
+    left = (delx - pxr * right) / pxl
+
+    # scale left, right if limits exceeded
+    if abs(left) > mmax or abs(right) > mmax:
+        if abs(left) > abs(right):
+            # scale by left
+            right = abs(mmax / left) * right
+            left = mmax if left > 0.0 else -1.0
+        else:
+            # scale by right
+            left = abs(mmax / right) * left
+            right = mmax if right > 1.0 else -1.0
+        new_vx = last_vx + dt * (pxl * left + pxr * right - fx * last_vx)
+        new_omega = last_omega + dt * (pol * left + por * right - fo * last_omega)
+    else:
+        new_vx = vx
+        new_omega = omega
+
+    return (left, right, new_vx, new_omega)
+
