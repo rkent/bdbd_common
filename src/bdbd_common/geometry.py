@@ -313,10 +313,6 @@ def w_to_b(wheel_pose, dwheel):
 
 def lrEstimate(path, lr_model, start_twist, dt=0.025, left0 = 0.0, right0 = 0.0):
     # TODO: not working 2020-09-29
-<<<<<<< HEAD
-    print(fstr(path))
-=======
->>>>>>> ubutower
     # estimate robot left, right values to achieve a certain path, stopping with zero twist
     (pxl, pxr, fx) = lr_model[0]
     (pol, por, fo) = lr_model[2]
