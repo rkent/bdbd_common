@@ -1,0 +1,39 @@
+# goal definition
+float64[] start_lefts
+float64[] start_rights
+float64[3] start_pose
+float64[3] start_twist
+float64[3] target_pose
+float64[3] target_twist
+float64[2] target_lr
+float64 dt
+float64 Wmax
+float64 Wjerk
+float64 Wback
+float64 mmax
+uint16 gaussItersMax
+uint16 nrItersMax
+---
+# result definition
+float64 dt
+float64 loss
+float64[] lefts
+float64[] rights
+float64[] pxj
+float64[] pyj
+float64[] thetaj
+float64[] vxj
+float64[] vyj
+float64[] omegaj
+---
+# feedback definition
+float64 dt
+float64 loss
+float64[] lefts
+float64[] rights
+float64[] pxj
+float64[] pyj
+float64[] thetaj
+float64[] vxj
+float64[] vyj
+float64[] omegaj
