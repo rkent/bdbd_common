@@ -13,10 +13,12 @@ float64 Wback
 float64 mmax
 uint16 gaussItersMax
 uint16 nrItersMax
+uint16 rate
 ---
 # result definition
 float64 dt
 float64 loss
+float64[3] now_pose_map
 float64[] lefts
 float64[] rights
 float64[] pxj
@@ -29,6 +31,7 @@ float64[] omegaj
 # feedback definition
 float64 dt
 float64 loss
+float64[3] now_pose_map
 float64[] lefts
 float64[] rights
 float64[] pxj
