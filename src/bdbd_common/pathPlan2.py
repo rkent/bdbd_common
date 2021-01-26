@@ -1,8 +1,123 @@
 from bdbd_common.geometry import threeSegmentPath, twoArcPath, HALFPI, TWOPI, \
-    default_lr_model, pose3to2, nearestLinePoint, nearestArcPoint, transform2d, lr_est
+    default_lr_model, pose3to2, nearestLinePoint, nearestArcPoint, transform2d, lr_est, \
+    oneArcPath
 
-from bdbd_common.utils import fstr
+from bdbd_common.utils import fstr, gstr
 import math
+
+def static_plan(
+    start_pose=(0.0, 0.0, 0.0),
+    start_twist=(0.0, 0.0, 0.0),
+    target_pose=(0.0, 0.0, 0.0),
+    target_twist=(0.0, 0.0, 0.0),
+    approach_rho=0.08, # radius of planned approach
+    min_rho=0.02, # the smallest radius we allow in a path plan,
+    cruise_v = 0.25,
+    u=0.50,
+    details=False,
+    max_segments=3,
+    vhat_start=None
+):
+    if details:
+        print(fstr({
+            's_pose': start_pose,
+            't_pose': target_pose,
+            's_twist': start_twist,
+            't_twist': target_twist
+        }))
+    # estimate left, right to achieve the path
+    pp = PathPlan(approach_rho=approach_rho, min_rho=min_rho)
+    pp.start2(start_pose, target_pose, max_segments=max_segments)
+
+    # calculate start vhat from start_twist
+    if vhat_start is None:
+        vhat_start = abs(start_twist[0]) + abs(start_twist[2] * pp.rhohat)
+    pp.speedPlan(vhat_start, cruise_v, target_twist[0], u=u)
+
+    return pp
+
+def speedPlan(lp, v0=0.0, vc=0.3, vn=0.0, u=0.25):
+    # plan for speeds in a static path, with maximum speed slew rate
+    # lp: total path length
+    # v0, vn: start, finish speeds
+    # vc: cruise speed
+    # u: time allowed to slew from 0 to vc
+    # See RKJ 2020-12-21
+    if vc <= 0.:
+        raise Exception('vc must be positive, non-zero')
+    s_plan = []
+
+    # try ramp to vc, then to vn
+    S = None if u == 0.0 else vc / u
+    d0 = abs(vc*vc - v0*v0) / (2*S) if S else None
+    d2 = abs(vc*vc - vn*vn) / (2*S) if S else None
+    print(fstr({'v0': v0, 'vn': vn, 'vc': vc, 'lp': lp, 'u': u, 'd0': d0, 'd2': d2}))
+
+    if S and d0 + d2 < lp:
+        d1 = (lp - d0 - d2)
+        t1 = d1 / vc
+        s_plan = [
+            {
+                'start': 0.0,
+                'end': d0,
+                'vstart': v0,
+                'vend': vc,
+                'time': (vc - v0) / S
+            },
+            {
+                'start': d0,
+                'end': d0 + d1,
+                'vstart': vc,
+                'vend': vc,
+                'time': t1
+            },
+            {
+                'start': d0 + d1,
+                'end': lp,
+                'vstart': vc,
+                'vend': vn,
+                'time': (vc - vn) / S
+            }
+        ]
+
+    else:
+        # try to increase to a speed vm, then decelerate to vn
+        dp = (v0*v0 + vn*vn) / (2.0 * S)
+        vm2 = S * (lp + dp)
+        vm = math.sqrt(vm2)
+
+        if vm > v0 and vm > vn:
+            # Case 2a: t1 = 0, 2-segment ramp up then down
+            d0 = (vm*vm - v0*v0) / (2.0 * S)
+            s_plan = [
+                {
+                    'start': 0.0,
+                    'end': d0,
+                    'vstart': v0,
+                    'vend': vm,
+                    'time': (vm - v0) / S
+                },
+                {
+                    'start': d0,
+                    'end': lp,
+                    'vstart': vm,
+                    'vend': vn,
+                    'time': (vm - vn) / S
+                }
+            ]
+        else:
+            # just ramp from v0 to vn
+            s_plan = [
+                {
+                    'start': 0.0,
+                    'end': lp,
+                    'vstart': v0,
+                    'vend': vn,
+                    'time': 2 * lp / (v0 + vn) if (v0 + vn) != 0.0 else 0.0
+                }
+            ]
+
+    return s_plan
 
 class PathPlan():
     '''
@@ -48,7 +163,7 @@ class PathPlan():
         self.lp_frac = 0.0
         self.dy_r = None
         self.psi = None
-        self.kappamax = 1. / min_rho
+        self.kappamax = 1. / min_rho if min_rho != 0.0 else None
         self.lastt = 0.0
         self.vhatmin = -0.1
 
@@ -81,7 +196,6 @@ class PathPlan():
         self.frame_m = (0., 0., 0.) # this is the privileged frame that others are relative to
 
     def start(self, start_pose, end_pose):
-        print(fstr({'\nstart_pose': start_pose, '\nend_pose': end_pose}))
         # develop a path plan from start_pose to end_pose (as Pose message format)
         self.start_pose = start_pose
         self.end_pose = end_pose
@@ -92,10 +206,11 @@ class PathPlan():
         end_m = pose3to2(end_pose)
         return self.start2(start_m, end_m)
 
-    def start2(self, start_m, end_m):
+    def start2(self, start_m, end_m, max_segments=3):
+        # _m here means the model frame, whose origin is the path starting point at the measurement point
         self.start_m = start_m
         self.end_m = end_m
-            
+
         # at the start, the robot base is at start_m, so that is the origin of the robot frame
         self.wheelstart_m = transform2d(self.wheel_r, self.start_m, self.frame_m)
 
@@ -110,132 +225,67 @@ class PathPlan():
 
         if self.start_m[0] == self.end_m[0] and self.start_m[1] == self.end_m[1] and self.start_m[2] == self.end_m[2]:
             # null request
-            return ()
+            return []
 
         # determine a path plan given 2d coordinates
-        # select the best two segment solution, if it exists
+        
+        # select the shortest two segment solution
         paths2a = twoArcPath(*self.end_p)
-        path2a = None
-        for p in paths2a:
-            if p[0]['radius'] > self.min_rho:
-                # pylint: disable=unsubscriptable-object
-                if path2a is None or (p[0]['radius'] > self.min_rho and p[0]['radius'] < path2a[0]['radius']):
-                    path2a = p
+        el0 = paths2a[0][0]['length'] + paths2a[0][1]['length']
+        el1 = paths2a[1][0]['length'] + paths2a[1][1]['length']
+        path2a = paths2a[0] if el0 < el1 else paths2a[1]
+        print(' ')
 
-        path3a = threeSegmentPath(self.end_p[0], self.end_p[1], self.end_p[2], self.approach_rho)
-
-        if path2a and (
-             path2a[0]['radius'] > self.min_rho and path2a[0]['radius'] < self.approach_rho
-        ):
-            # use the 2 segment solution
-            path3a = None
+        if max_segments >= 3 and path2a[0]['radius'] > self.approach_rho:
+            self.path = threeSegmentPath(*self.end_p, self.approach_rho)
+        elif max_segments >= 2 and path2a[0]['radius'] > self.min_rho:
+            self.path = path2a
         else:
-            # use the 3 segment solution
-            path2a = None
+            self.path = [oneArcPath(*self.end_p)]
+            print('oneArcPath(' + fstr(self.end_p) + ')')
 
-        self.path = path2a or path3a
-
+        for seg in self.path:
+            print(fstr(seg))
         # add lprime to path plan, used by velocity
         for seg in self.path:
             if 'radius' in seg:
                 rho = seg['radius']
-                seg['lprime'] = seg['length'] * (rho + self.rhohat) / rho
+                if rho == 0.0:
+                    seg['lprime'] = abs(seg['angle'] * (rho + self.rhohat))
+                else:
+                    seg['lprime'] = seg['length'] * (rho + self.rhohat) / rho
             else:
                 seg['lprime'] = seg['length']
 
         return self.path
 
-    def speedPlan(self, vhat0, vhatcruise, vhatn, u=0.50):
+    def speedPlan(self, vhat0, vhatcruise, vhatn, u=0.50, slow=0.05):
         '''
         Given the path plan, determine a speed plan. Speeds are in 'hat' transformed form,
-        see RKJ 2020-09-23 p 33
 
         vhat0: starting speed
         vhatcruise: cruising speed
         vhatn: final speed
         u: time for speed transition
+        slow: vhat at path plan transitions
         '''
 
+        s_plan = []
         if self.path is None:
             raise Exception("You need to call start to determine the path plan before calling speedPlan")
 
-        # calculate the total path length in transformed coordinates
         lprime_sum = 0.0
-        for seg in self.path:
-            # pylint: disable=unsupported-membership-test,unsubscriptable-object
-            if 'radius' in seg:
-                lprime_sum += abs(seg['angle']) * (seg['radius'] + self.rhohat)
-            else:
-                lprime_sum += math.sqrt(
-                    (seg['start'][0] - seg['end'][0])**2 +
-                    (seg['start'][1] - seg['end'][1])**2
-                )
-
-        s_plan = None
-
-        # See RKJ 2020-09-24 p36 for plan.
-        # 1) Check for short path to target
-        if vhat0 + vhatn != 0.0:
-            dt = 2.0 * lprime_sum / (vhat0 + vhatn)
-            if dt < 2.0 * u:
-                s_plan = [
-                    {
-                        'start': 0.0,
-                        'end': lprime_sum,
-                        'vstart': vhat0,
-                        'vend': vhatn,
-                        'time': dt
-                    }
-                ]
-
-        # 2) Ramp to a value, then ramp to vhatn
-        if s_plan is None:
-            vhatm = lprime_sum / u - 0.5 * (vhat0 + vhatn)
-            if vhatm < vhatcruise:
-                s_plan = [
-                    {
-                        'start': 0.0,
-                        'end': lprime_sum / 2.0,
-                        'vstart': vhat0,
-                        'vend': vhatm,
-                        'time': u
-                    },
-                    {
-                        'start': lprime_sum / 2.0,
-                        'end': lprime_sum,
-                        'vstart': vhatm,
-                        'vend': vhatn,
-                        'time': u
-                    }
-                ]
-
-        # 3) Add a length of vcruise in middle
-        if s_plan is None:
-            lprime_0 = 0.5 * u * (vhat0 + vhatcruise)
-            lprime_n = 0.5 * u * (vhatn + vhatcruise)
-            s_plan = [
-                {
-                    'start': 0.0,
-                    'end': lprime_0,
-                    'vstart': vhat0,
-                    'vend': vhatcruise,
-                    'time': u
-                },
-                {
-                    'start': lprime_0,
-                    'end': lprime_sum - lprime_n,
-                    'vstart': vhatcruise,
-                    'vend': vhatcruise,
-                    'time': (lprime_sum - lprime_n - lprime_0) / vhatcruise
-                },
-                {
-                    'start': lprime_sum - lprime_n,
-                    'end': lprime_sum,
-                    'vstart': vhatcruise,
-                    'vend': vhatn,
-                    'time': u
-                }
-            ]
+        for i in range(len(self.path)):
+            seg = self.path[i]
+            vend = vhatn if i == len(self.path) - 1 else slow
+            vstart = vhat0 if i == 0 else slow
+            #print(fstr({'seg': seg}))
+            seg_plans = speedPlan(seg['lprime'], vstart, vhatcruise, vend, u)
+            for seg_plan in seg_plans:
+                seg_plan['start'] += lprime_sum
+                seg_plan['end'] += lprime_sum
+                s_plan.append(seg_plan)
+            lprime_sum = seg_plans[-1]['end']
 
         self.s_plan = s_plan
         return s_plan
@@ -270,7 +320,7 @@ class PathPlan():
                 tend += seg['time']
 
         seg = self.s_plan[seg_index]
-        d_vhat_dt = (seg['vend'] - seg['vstart']) / seg['time']
+        d_vhat_dt = (seg['vend'] - seg['vstart']) / seg['time'] if seg['time'] else 0.0
         vhat = seg['vstart'] + seg_time * d_vhat_dt
         sprime = seg['start'] + 0.5 * seg_time * (seg['vstart'] + vhat)
 
@@ -279,10 +329,12 @@ class PathPlan():
         sprime_sum = 0.0
         v = None
         omega = None
+        direction = 1.0
         p = None
         for i in range(len(self.path)):
             seg = self.path[i]
             lprime = seg['lprime']
+            #print(fstr({'lprime': lprime}))
 
             if sprime_sum + lprime > sprime and v is None:
                 # this is the correct segment
@@ -297,7 +349,8 @@ class PathPlan():
                     by = seg['start'][1] + frac * (seg['end'][1] - seg['start'][1])
                 else:
                     v = vhat * rho / (rho + self.rhohat)
-                    omega = math.copysign(v / rho, seg['angle'])
+                    direction = math.copysign(1.0, seg['angle'])
+                    omega = math.copysign(vhat / (rho + self.rhohat), seg['angle'])
                     arc_angle = seg['angle'] * frac
                     theta = seg['start'][2] + arc_angle
                     if seg['angle'] > 0.0:
@@ -317,12 +370,12 @@ class PathPlan():
             if 'radius' in self.path[-1]:
                 rho = self.path[-1]['radius']
                 v = vhat * rho / (rho + self.rhohat)
-                omega = math.copysign(v / rho, self.path[-1]['angle'])
+                omega = math.copysign(vhat / (rho + self.rhohat), self.path[-1]['angle'])
             else:
                 v = vhat
                 omega = 0.0
                 rho = None
-            
+
         return {
             'time': tend,
             'sprime': sprime,
@@ -333,7 +386,8 @@ class PathPlan():
             'kappa': kappa,
             'point': p,
             'd_vhat_dt': d_vhat_dt,
-            'fraction': sprime / sprime_sum if sprime_sum != 0.0 else 0.0
+            'fraction': sprime / sprime_sum if sprime_sum != 0.0 else 1.0,
+            'direction': direction
         }
 
     def nearestPlanPoint(self, wheel_pose_p):
@@ -451,7 +505,7 @@ class PathPlan():
         kappa_new = kappa_combo + \
             -self.Cp * dy_r - self.Cd * math.sin(psi) -  self.Cy * dydt - self.Cj * dsinpdt
 
-        kappa_new = min(self.kappamax, max(-self.kappamax, kappa_new))
+        kappa_new = kappa_new if self.kappamax is None else min(self.kappamax, max(-self.kappamax, kappa_new))
 
         ev = vhata - vhat_plan
         devdt = (ev - self.evold) / dt
@@ -483,20 +537,28 @@ class PathPlan():
         self.lp_frac = near_wheel['fraction']
         return (v_new, o_new)
 
-    def nextPlanPoint(self, dt, pose_p):
+    def nextPlanPoint(self, dt, pose_p, corr_radius=1.0):
+
+        # Adjust for theta error using RKJ notebook 2020-12-7
+        #corr_radius = 0.10
 
         def distance(p1, p2):
-            return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+            dtheta = (corr_radius * (1.0 - math.cos(p1[2] - p2[2])))**2
+            return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2 + dtheta)
 
         def t_wp_rp(wp):
             wheel_m = transform2d(wp, self.frame_p, self.frame_m)
             robot_p = transform2d(self.robot_w, wheel_m, self.frame_p)
+            #print(fstr({'t_wp_rp': (wp, wheel_m, robot_p, self.robot_w)}))
             return robot_p
 
         # determine the closest point on the plan to pose_p, moving forward dt seconds
-        t0 = self.lastt + .5 * dt
-        t1 = self.lastt + 5. * dt / 4.
-        t2 = self.lastt + 2. * dt
+        # RKJ 2020-10-21 p 50
+        dtx = 0.75 * dt
+        dt0 = 0.5 * dt
+        t0 = self.lastt + dt0
+        t1 = t0 + dtx
+        t2 = t1 + dtx
         # transform2d(pp.robot_w, plan_w_m, pp.frame_m)
         pp0 = t_wp_rp(self.v(t0)['point'])
         pp1 = t_wp_rp(self.v(t1)['point'])
@@ -505,14 +567,15 @@ class PathPlan():
         d1 = distance(pose_p, pp1)
         d2 = distance(pose_p, pp2)
         #print(fstr((pose_p, self.v(t0), d0, d1, d2), fmat='8.5f'))
-        #print(fstr((t0, pp0, t1, pp1, t2, pp2), fmat='8.5f'))
         deriv2 = d0 + d2 - 2.0 * d1 # proportional to second derivative
         if deriv2 <= 0.0:
             # this is a maximum, just pick the smallest edge. 0.0 is t0, 2.0 is t2
             tt = t0 if d0 < d2 else t2
         else:
-            tt = self.lastt + (3. * dt / 4.) * (3.0 * d0 + d2 - 4.0 * d1) / (2.0 * deriv2)
+            tau = (3.0 * d0 + d2 - 4.0 * d1) / (2.0 * deriv2)
+            tt = t0 + tau * dtx
             #print('used deriv2, tt is {}'.format(tt))
+        print('nextPlanPoint ' + fstr((tt, pose_p, t0, d0, pp0, t1, d1, pp1, t2, d2, pp2), fmat='8.5f'))
         tt = max(t0, min(t2, tt))
         self.lastt = tt
         return self.v(tt)

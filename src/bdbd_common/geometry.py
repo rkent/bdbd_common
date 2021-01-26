@@ -3,7 +3,7 @@
 import tf
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 import math
-from math import sin, cos, pi, sqrt, atan2, copysign
+from math import sin, cos, pi, sqrt, atan2, tan, copysign
 import rospy
 from geometry_msgs.msg import Quaternion, PoseStamped, PointStamped, Pose
 from bdbd_common.utils import fstr
@@ -73,6 +73,63 @@ def rotationCenter(frame, vx, vy, omega):
     center.point.x = -a
     center.point.y = r
     return center
+
+def oneArcPath(x0, y0, theta):
+    ''' calculate the arc to find the closest point to x,y with angle theta.
+        See RKJ 01-21-2021
+    '''
+    px = .5 * (x0 * (1. + cos(theta)) + y0 * sin(theta))
+    py = .5 * (x0 * sin(theta) + y0 * (1.-cos(theta)))
+    if px > 0.0:
+        kappa = sin(theta) / px
+        rho = abs(1./kappa) if kappa != 0.0 else None
+        arc = {
+            'start': (0.0, 0.0, 0.0),
+            'end': (px, py, theta),
+            'center': (0.0, 1./kappa) if kappa != 0.0 else None,
+            'radius': rho,
+            'angle': theta,
+            'length': abs(rho * theta) if rho is not None else sqrt(px**2 + py**2),
+            'kappa': kappa
+        }
+    else:
+        # just rotate in place
+        arc = {
+            'start': (0.0, 0.0, 0.0),
+            'end': (0.0, 0.0, theta),
+            'center': (0.0, 0.0, 0.0),
+            'radius': 0.0,
+            'angle': theta,
+            'length': 0.0,
+            'kappa': None
+
+        }
+    return arc
+
+def oneArcPathOld(x, y, beta):
+    ''' calculate the arc to find the closest point to x,y with angle beta.
+        See RKJ 12-18-20 p 65
+    '''
+    # constrain beta to +/- pi
+    beta = (beta + pi) % TWOPI - pi
+    denom = y * tan(beta) + x
+    if denom == 0.0:
+        kappa = 1.e10
+    else:
+        kappa = tan(beta) / denom
+    if kappa == 0.0:
+        kappa = 1.e-10
+    
+    arc = {
+        'start': (0.0, 0.0, 0.0),
+        'end': (sin(beta) / kappa, (1. - cos(beta)) / kappa, beta),
+        'center': (0.0, 1./kappa),
+        'radius': abs(1./kappa),
+        'angle': beta,
+        'length': abs(beta/kappa),
+        'kappa': kappa
+    }
+    return arc
 
 def threeSegmentPath( x, y, phi, rho):
     #print('threeSegmentPath: ' + fstr({'x': x, 'y': y, 'phi': phi, 'rho': rho},'8.5f'))
@@ -392,7 +449,7 @@ def default_lr_model():
     pol = -7.659 # note this is negative of previous model, for consistency.
     por = 7.624
     fo = 8.464
-    return ((pxl, pxr, fx), (pyl, pyr, fy), (pol, por, fo))
+    return ([pxl, pxr, fx], [pyl, pyr, fy], [pol, por, fo])
 
 class Motor:
         # return motor left, right for a given speed, rotation
@@ -571,6 +628,7 @@ class DynamicStep:
     # simple dynamic model of bdbd motion
     def __init__(self, lr_model=default_lr_model()):
         self.lr_model = lr_model
+        print(fstr({'DynamicStep lr_model': self.lr_model}))
 
     def __call__(self, lr, dt, pose_m, twist_m):
         # apply lr=(left, right) over time dt, starting from pose=(x, y, theta) and twist=(vx, vy, omega)
@@ -600,7 +658,7 @@ class DynamicStep:
         return ((xNew_m, yNew_m, thetaNew_m), (vxNew_m, vyNew_m, omegaNew), (vx_r, vy_r, omegaNew))
 
 def lr_est(vx, omega, last_vx, last_omega, dt, lr_model=default_lr_model(), mmax=1.0):
-    # estimate values for left, right using the dymanic model with limits
+    # estimate values for left, right using the dynamic model with limits RKJ 2020-10-26 p 52
     (pxl, pxr, fx) = lr_model[0]
     (pol, por, fo) = lr_model[2]
 

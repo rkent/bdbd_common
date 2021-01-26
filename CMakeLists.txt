@@ -53,7 +53,7 @@ catkin_python_setup()
 ## Generate messages in the 'msg' folder
 add_message_files(FILES
    LeftRights.msg
-   LrResult.msg
+   LrResults.msg
    MotorsRaw.msg
 )
 

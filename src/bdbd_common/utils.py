@@ -9,20 +9,14 @@ def fstr(v, fmat='6.3f', n_per_line=None):
             s += '{}: {}'.format(key, fstr(var, fmat, n_per_line))
         s += '} '
     elif isinstance(v, list):
+        s += '[ '
         count = 0
         for var in v:
-            if n_per_line is not None:
-                if count % n_per_line == 0:
-                    if count == 0:
-                        s += '\n['
-                    else:
-                        s += '\n '
-            else:
-                if count == 0:
-                    s += '['
+            if n_per_line and count % n_per_line == 0:
+                s += '\n  '
             s += '{}'.format(fstr(var, fmat, n_per_line))
             count += 1
-        s += ']'
+        s += '] '
     elif isinstance(v, tuple):
         s += '('
         for var in v:

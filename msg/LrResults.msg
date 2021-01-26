@@ -2,6 +2,7 @@
 float64 dt
 float64 loss
 float64[3] now_pose_map
+float64[3] now_pose_start
 float64[] lefts
 float64[] rights
 float64[] pxj
