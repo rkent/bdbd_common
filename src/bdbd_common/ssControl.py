@@ -94,8 +94,6 @@ class SsControl():
             sdot = vv['d_vhat_dt'] / (1.0 + pp.rhohat * abs(vv['kappa']))
             odot = vv['kappa'] * sdot
 
-        s0 = s0 if s0 else 0.001
-
         eps = np.array([
             [vxr_w - vv['v']],
             [vyw_n],
@@ -125,6 +123,9 @@ class SsControl():
                 (bor * bxl - bxr * bol)
         )
 
+        # small s0 values lead to an unstable control calculation
+        s0 = max(s0, .04)
+
         A = np.array((
                 (-qx, 0, 0, 0, 0, -omega0 * s0),
                 (omega0, 0, s0, 0, 0, -qx * s0),
@@ -135,7 +136,7 @@ class SsControl():
         ))
         Kr = control.place_varga(A, self.B, self.poles)
         print(gstr({'Kr': Kr}))
-        #print(gstr({'eps * Kr': np.squeeze(eps) * np.asarray(Kr)}))
+        print(gstr({'eps * Kr': np.squeeze(eps) * np.asarray(Kr)}))
         lrs = -Kr * eps
         #print({'lrs': np.squeeze(lrs)})
         corr_left = lrs[0][0]

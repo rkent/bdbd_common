@@ -10,9 +10,10 @@ def static_plan(
     start_twist=(0.0, 0.0, 0.0),
     target_pose=(0.0, 0.0, 0.0),
     target_twist=(0.0, 0.0, 0.0),
-    approach_rho=0.08, # radius of planned approach
-    min_rho=0.02, # the smallest radius we allow in a path plan,
+    approach_rho=0.20, # radius of planned approach
+    min_rho=0.10, # the smallest radius we allow in a path plan,
     cruise_v = 0.25,
+    vslow=0.05,
     u=0.50,
     details=False,
     max_segments=3,
@@ -32,11 +33,18 @@ def static_plan(
     # calculate start vhat from start_twist
     if vhat_start is None:
         vhat_start = abs(start_twist[0]) + abs(start_twist[2] * pp.rhohat)
-    pp.speedPlan(vhat_start, cruise_v, target_twist[0], u=u)
+    pp.speedPlan(vhat_start, cruise_v, target_twist[0], u=u, vslow=vslow)
+    if details:
+        print('path_plan')
+        for seg in pp.path:
+            print(fstr(seg))
+        print('speed_plan')
+        for seg in pp.s_plan:
+            print(fstr(seg))
 
     return pp
 
-def speedPlan(lp, v0=0.0, vc=0.3, vn=0.0, u=0.25):
+def segSpeed(lp, v0=0.0, vc=0.3, vn=0.0, u=0.25):
     # plan for speeds in a static path, with maximum speed slew rate
     # lp: total path length
     # v0, vn: start, finish speeds
@@ -237,7 +245,7 @@ class PathPlan():
         print(' ')
 
         if max_segments >= 3 and path2a[0]['radius'] > self.approach_rho:
-            self.path = threeSegmentPath(*self.end_p, self.approach_rho)
+            self.path = threeSegmentPath(*(self.end_p + (self.approach_rho,)))
         elif max_segments >= 2 and path2a[0]['radius'] > self.min_rho:
             self.path = path2a
         else:
@@ -259,7 +267,7 @@ class PathPlan():
 
         return self.path
 
-    def speedPlan(self, vhat0, vhatcruise, vhatn, u=0.50, slow=0.05):
+    def speedPlan(self, vhat0, vhatcruise, vhatn, u=0.50, vslow=0.05):
         '''
         Given the path plan, determine a speed plan. Speeds are in 'hat' transformed form,
 
@@ -267,7 +275,7 @@ class PathPlan():
         vhatcruise: cruising speed
         vhatn: final speed
         u: time for speed transition
-        slow: vhat at path plan transitions
+        vslow: vhat at path plan transitions
         '''
 
         s_plan = []
@@ -277,10 +285,10 @@ class PathPlan():
         lprime_sum = 0.0
         for i in range(len(self.path)):
             seg = self.path[i]
-            vend = vhatn if i == len(self.path) - 1 else slow
-            vstart = vhat0 if i == 0 else slow
+            vend = vhatn if i == len(self.path) - 1 else vslow
+            vstart = vhat0 if i == 0 else vslow
             #print(fstr({'seg': seg}))
-            seg_plans = speedPlan(seg['lprime'], vstart, vhatcruise, vend, u)
+            seg_plans = segSpeed(seg['lprime'], vstart, vhatcruise, vend, u)
             for seg_plan in seg_plans:
                 seg_plan['start'] += lprime_sum
                 seg_plan['end'] += lprime_sum

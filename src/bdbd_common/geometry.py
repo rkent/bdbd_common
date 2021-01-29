@@ -1,12 +1,24 @@
 # Common geometry methods
 
 import tf
+import os
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 import math
 from math import sin, cos, pi, sqrt, atan2, tan, copysign
 import rospy
+import numpy as np
 from geometry_msgs.msg import Quaternion, PoseStamped, PointStamped, Pose
 from bdbd_common.utils import fstr
+from nav_msgs.msg import Odometry
+from bdbd.msg import MotorsRaw
+from bdbd.libpy.Battery import Battery
+from copy import deepcopy
+import threading
+from collections import deque
+from functools import reduce
+import traceback
+import time
+import pickle
 
 D_TO_R = pi / 180. # degrees to radians
 TWOPI = 2. * pi
@@ -434,6 +446,193 @@ def lrEstimate(path, lr_model, start_twist, dt=0.025, left0 = 0.0, right0 = 0.0)
 
     return lrs
 
+class LrDynamicsStore():
+    def __init__(self, filedir=''):
+        self.odom_sub = None
+        self.odom_msg = None
+        self.odom_time = rospy.get_time()
+        self.motor_sub = None
+        self.motor_msg = None
+        self.motor_time = rospy.get_time()
+        self.lock = threading.Lock()
+        self.now_sync = 0.20
+        self.sample_sync = 0.05
+        self.battery = Battery()
+        self.data = []
+        self.lrdata = None
+        # use relative directory if filename is empty
+        if filedir and filedir[-1] != '/':
+            filedir += '/'
+        self.filename = filedir + 'lrdata.pickle'
+
+    def subscribe(self):
+        # collect a single sample of lr response data
+        topics = rospy.get_published_topics()
+        #print(topics)
+        odom_type = 'nav_msgs/Odometry'
+        odom_resource = None
+        motor_type = 'bdbd/MotorsRaw'
+        motor_resource = None
+        for topic in topics:
+            if topic[1] == odom_type:
+                odom_resource = topic[0]
+            if topic[1] == motor_type:
+                motor_resource = topic[0]
+        if motor_resource and odom_resource:
+            if not self.odom_sub:
+                self.odom_sub = rospy.Subscriber(odom_resource, Odometry, callback=self.odom_cb, queue_size=1)
+            if not self.motor_sub:
+                self.motor_sub = rospy.Subscriber(motor_resource, MotorsRaw, callback=self.motor_cb, queue_size=1)
+        else:
+            if self.odom_sub:
+                self.odom_sub.unregister()
+                self.odom_sub = None
+            if self.motor_sub:
+                self.motor_sub.unregister()
+                self.motor_sub = None
+        return bool(self.odom_sub and self.motor_sub)
+
+    def odom_cb(self, odom):
+        with self.lock:
+            self.odom_time = rospy.get_time()
+            self.odom_msg = odom
+
+    def motor_cb(self, motor):
+        with self.lock:
+            self.motor_time = rospy.get_time()
+            self.motor_msg = motor
+
+    def collect(self):
+        # collect a single data point if valid
+        datum = None
+        with self.lock:
+            odom_msg = deepcopy(self.odom_msg)
+            motor_msg = deepcopy(self.motor_msg)
+            odom_time = deepcopy(self.odom_time)
+            motor_time = deepcopy(self.motor_time)
+
+        if self.motor_sub and self.odom_sub and motor_msg and odom_msg:
+            now = rospy.get_time()
+            while True:
+                if abs(now - odom_time) > self.now_sync:
+                    rospy.logdebug('odom time too old')
+                    break
+                if abs(now - motor_time) > self.now_sync:
+                    rospy.logdebug('motor time too old')
+                    break
+                if abs(odom_time - motor_time) > self.sample_sync:
+                    rospy.logdebug('sample times too different')
+                    break
+                twist_r = twist3to2(self.odom_msg.twist.twist)
+                datum = (time.time(), twist_r, (motor_msg.left, motor_msg.right))
+                with self.lock:
+                    self.data.append(datum)
+                #print(fstr({'twist_r': datum[0], 'motor': datum[1]}))
+                return True
+        return False
+
+    def save(self, _):
+        start = time.time()
+        # save the data to a file, and update the lr_model
+        lrs = []
+        vxes = []
+        vyes = []
+        omegas = []
+        whens = []
+        with self.lock:
+            for datum in self.data:
+                (when, twist, lr) = datum
+                (vx, vy, omega) = twist
+                whens.append(when)
+                lrs.append(lr)
+                vxes.append(vx)
+                vyes.append(vy)
+                omegas.append(omega)
+
+        # check data quality
+        while True:
+            length = len(lrs)
+            if length < 10:
+                break
+            if len(vxes) != length or len(vyes) != length or len(omegas) != length:
+                rospy.logwarn('Length mismatch in collected data')
+                break
+            sq = lambda x, y: x + y**2
+            sq0 = lambda x, y: x + y[0]**2
+            sq1 = lambda x, y: x + y[1]**2
+            volt = self.battery()
+            lrms = math.sqrt(reduce(sq0, lrs, 0.0) / length)
+            rrms = math.sqrt(reduce(sq1, lrs, 0.0) / length)
+            vxrms = math.sqrt(reduce(sq, vxes, 0.0) / length)
+            omegarms = math.sqrt(reduce(sq, omegas, 0.0) / length)
+            print(fstr({'length': length, 'lrms': lrms, 'rrms': rrms, 'vxrms': vxrms, 'omegarms': omegarms, 'volt': volt}))
+            if not ((lrms > 0.2 or rrms >0.2) and (vxrms > 0.03 or omegarms > 0.18)):
+                break
+
+            print('saving this data')
+
+            self.ensure_lrdata()
+            (pwhens, pvolts, plrs, pvxes, pvyes, pomegas) = self.lrdata
+
+            pwhens.extend(whens)
+            pvolts.extend(length * [volt])
+            plrs.extend(lrs)
+            pvxes.extend(vxes)
+            pvyes.extend(vyes)
+            pomegas.extend(omegas)
+            # save with a little dance to preserve old data on error
+            with open(self.filename + '.new', 'wb') as file:
+                pickle.dump(self.lrdata, file)
+            try:
+                os.remove(self.filename + '.old')
+            except:
+                rospy.logwarn(traceback.format_exc())
+            try:
+                os.rename(self.filename, self.filename + '.old')
+            except:
+                rospy.logwarn(traceback.format_exc())
+            os.rename(self.filename + '.new', self.filename)
+            print('saved pickled data with elapsed time {:6.3f} total samples {}'.format(time.time() - start, len(plrs)))
+            self.get_lr_model()
+            break
+        with self.lock:
+            self.data = []
+
+    def ensure_lrdata(self):
+        if self.lrdata is None:
+            if os.path.exists(self.filename):
+                with open(self.filename) as file:
+                    self.lrdata = pickle.load(file)
+            else:
+                self.lrdata = (
+                    deque([], maxlen=1000),
+                    deque([], maxlen=1000),
+                    deque([], maxlen=1000),
+                    deque([], maxlen=1000),
+                    deque([], maxlen=1000),
+                    deque([], maxlen=1000)
+                )
+
+    def get_lr_model(self):
+        q = 8.0
+        lr_model = default_lr_model()
+        self.ensure_lrdata()
+        (pwhens, pvolts, plrs, pvxes, pvyes, pomegas) = self.lrdata
+        if len(plrs) > 20:
+            # use the accumulated capture data to estimate lr_model
+            lrs = np.array(list(plrs))
+            (qbx, residuals, rank, s) = np.linalg.lstsq(lrs, np.array(list(pvxes)))
+            (qby, residuals, rank, s) = np.linalg.lstsq(lrs, np.array(list(pvyes)))
+            (qbo, residuals, rank, s) = np.linalg.lstsq(lrs, np.array(list(pomegas)))
+            lr_model = (
+                (qbx[0]*q, qbx[1]*q, q),
+                (qby[0]*q, qby[1]*q, q),
+                (qbo[0]*q, qbo[1]*q, q)
+            )
+            print('lr_model', fstr(lr_model))
+
+        return lr_model
+
 def default_lr_model():
     # vx model
     pxl = 1.258
@@ -608,6 +807,8 @@ def transform2d(poseA, frameA, frameB):
     xB = xAB * cos(theta) + yAB * sin(theta)
     yB = yAB * cos(theta) - xAB * sin(theta)
     thetaB = thetaA - theta
+    # constrain to +/- pi
+    thetaB = (thetaB + pi) % TWOPI - pi
     return (xB, yB, thetaB) 
 
 def pose2to3(pose2d):
@@ -623,6 +824,9 @@ def pose3to2(pose3d):
     theta = euler_from_quaternion(q_to_array(pose3d.orientation))[2]
     pose2d = (pose3d.position.x, pose3d.position.y, theta)
     return pose2d
+
+def twist3to2(twist3d):
+    return (twist3d.linear.x, twist3d.linear.y, twist3d.angular.z)
 
 class DynamicStep:
     # simple dynamic model of bdbd motion
