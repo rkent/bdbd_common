@@ -583,7 +583,7 @@ class PathPlan():
             tau = (3.0 * d0 + d2 - 4.0 * d1) / (2.0 * deriv2)
             tt = t0 + tau * dtx
             #print('used deriv2, tt is {}'.format(tt))
-        print('nextPlanPoint ' + fstr((tt, pose_p, t0, d0, pp0, t1, d1, pp1, t2, d2, pp2), fmat='8.5f'))
+        #print('nextPlanPoint ' + fstr((tt, pose_p, t0, d0, pp0, t1, d1, pp1, t2, d2, pp2), fmat='8.5f'))
         tt = max(t0, min(t2, tt))
         self.lastt = tt
         return self.v(tt)

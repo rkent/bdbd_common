@@ -59,7 +59,7 @@ class SsControl():
         # control algorithm
         pose_p = transform2d(pose_m, frame_m, pp.frame_p)
         vv = pp.nextPlanPoint(dt, pose_p)
-        print(fstr({'vv': vv}))
+        #print(fstr({'vv': vv}))
         #if vv['fraction'] > 0.999:
         #    break
 
@@ -70,7 +70,7 @@ class SsControl():
         wheel_m = transform2d(pp.wheel_r, pose_m, frame_m)
         wheel_n = transform2d(wheel_m, frame_m, frame_n)
         theta_n = wheel_n[2]
-        print(fstr({'frame_n': frame_n, 'wheel_n': wheel_n, 'pp.frame_p': pp.frame_p}))
+        #print(fstr({'frame_n': frame_n, 'wheel_n': wheel_n, 'pp.frame_p': pp.frame_p}))
 
         # twist in robot frame
         vxr_r = twist_r[0]
@@ -108,7 +108,7 @@ class SsControl():
             sum += err**2
         rms_err = math.sqrt(sum / len(eps))
 
-        print(fstr({'eps': eps, 'rms_err': rms_err, 'vxw_n': vyw_n}))
+        #print(fstr({'eps': eps, 'rms_err': rms_err, 'vxw_n': vyw_n}))
 
         # the base frame (zero_map at start of plan) is the robot location. But the path
         # plan is in plan coordinates, with 0 being the wheel start.
@@ -135,8 +135,8 @@ class SsControl():
                 (0, 0, 1, 0, 0, 0)
         ))
         Kr = control.place_varga(A, self.B, self.poles)
-        print(gstr({'Kr': Kr}))
-        print(gstr({'eps * Kr': np.squeeze(eps) * np.asarray(Kr)}))
+        #print(gstr({'Kr': Kr}))
+        #print(gstr({'eps * Kr': np.squeeze(eps) * np.asarray(Kr)}))
         lrs = -Kr * eps
         #print({'lrs': np.squeeze(lrs)})
         corr_left = lrs[0][0]

@@ -468,7 +468,6 @@ class LrDynamicsStore():
     def subscribe(self):
         # collect a single sample of lr response data
         topics = rospy.get_published_topics()
-        #print(topics)
         odom_type = 'nav_msgs/Odometry'
         odom_resource = None
         motor_type = 'bdbd/MotorsRaw'
@@ -527,7 +526,6 @@ class LrDynamicsStore():
                 datum = (time.time(), twist_r, (motor_msg.left, motor_msg.right))
                 with self.lock:
                     self.data.append(datum)
-                #print(fstr({'twist_r': datum[0], 'motor': datum[1]}))
                 return True
         return False
 
@@ -565,11 +563,9 @@ class LrDynamicsStore():
             rrms = math.sqrt(reduce(sq1, lrs, 0.0) / length)
             vxrms = math.sqrt(reduce(sq, vxes, 0.0) / length)
             omegarms = math.sqrt(reduce(sq, omegas, 0.0) / length)
-            print(fstr({'length': length, 'lrms': lrms, 'rrms': rrms, 'vxrms': vxrms, 'omegarms': omegarms, 'volt': volt}))
+            #print(fstr({'length': length, 'lrms': lrms, 'rrms': rrms, 'vxrms': vxrms, 'omegarms': omegarms, 'volt': volt}))
             if not ((lrms > 0.2 or rrms >0.2) and (vxrms > 0.03 or omegarms > 0.18)):
                 break
-
-            print('saving this data')
 
             self.ensure_lrdata()
             (pwhens, pvolts, plrs, pvxes, pvyes, pomegas) = self.lrdata
@@ -592,7 +588,7 @@ class LrDynamicsStore():
             except:
                 rospy.logwarn(traceback.format_exc())
             os.rename(self.filename + '.new', self.filename)
-            print('saved pickled data with elapsed time {:6.3f} total samples {}'.format(time.time() - start, len(plrs)))
+            rospy.loginfo('saved pickled data with elapsed time {:6.3f} total samples {}'.format(time.time() - start, len(plrs)))
             self.get_lr_model()
             break
         with self.lock:
@@ -629,7 +625,6 @@ class LrDynamicsStore():
                 (qby[0]*q, qby[1]*q, q),
                 (qbo[0]*q, qbo[1]*q, q)
             )
-            print('lr_model', fstr(lr_model))
 
         return lr_model
 
