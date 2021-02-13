@@ -1,0 +1,13 @@
+# process an image to detect objects
+Header header
+# either provide an image or an image topic
+sensor_msgs/CompressedImage image
+string image_topic
+uint16 max_detections
+float32 min_threshold
+---
+Header header
+vision_msgs/BoundingBox2D[] boxes
+float32[] scores
+float32[] class_names
+uint16[] class_ids

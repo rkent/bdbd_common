@@ -15,6 +15,8 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   message_generation
   actionlib_msgs
+  sensor_msgs
+  vision_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -61,6 +63,7 @@ add_message_files(FILES
 add_service_files(FILES
    DockerCommand.srv
    Dialog.srv
+   ObjectDetect.srv
 )
 
 ## Generate actions in the 'action' folder
@@ -73,6 +76,8 @@ generate_messages(
   DEPENDENCIES
   std_msgs
   actionlib_msgs
+  sensor_msgs
+  vision_msgs
 )
 
 ################################################
