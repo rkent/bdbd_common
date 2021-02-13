@@ -1,3 +1,17 @@
+import inspect
+
+def reach(name) :
+    # https://stackoverflow.com/questions/15608987/access-variables-of-caller-function-in-python
+    for f in inspect.stack() :
+        if name in f[0].f_locals : return f[0].f_locals[name]
+    return None 
+
+def sstr(vs, **kwargs):
+    dd = dict()
+    for v in vs.split(' '):
+        dd[v] = reach(v)
+    return fstr(dd, **kwargs)
+
 def fstr(v, fmat='6.3f', n_per_line=None):
     # generate an output string with floats formatted using fmat
     s = ''
