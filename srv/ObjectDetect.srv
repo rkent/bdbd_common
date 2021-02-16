@@ -7,7 +7,11 @@ uint16 max_detections
 float32 min_threshold
 ---
 Header header
-vision_msgs/BoundingBox2D[] boxes
 float32[] scores
-float32[] class_names
+string[] class_names
 uint16[] class_ids
+# location of object box in image in pixels
+uint16[] xmin
+uint16[] ymin
+uint16[] xmax
+uint16[] ymax

@@ -19,8 +19,13 @@ def fstr(v, fmat='6.3f', n_per_line=None):
         s += ("{:" + fmat + "} ").format(v)
     elif isinstance(v, dict):
         s += '{ '
+        firstItem = True
         for key, var in v.items():
-            s += '{}: {}'.format(key, fstr(var, fmat, n_per_line))
+            if not firstItem:
+                s += ','
+            else:
+                firstItem = False
+            s += ' {}: {}'.format(key, fstr(var, fmat, n_per_line))
         s += '} '
     elif isinstance(v, list):
         s += '[ '
@@ -52,3 +57,24 @@ def fstr(v, fmat='6.3f', n_per_line=None):
 def gstr(v, fmat='9.3g', n_per_line=10):
     # a variation of fstr that works better with small numbers
     return fstr(v, fmat, n_per_line)
+
+def getShape(o):
+    s = ''
+    if o is None:
+        s += ' None '
+    elif isinstance(o, str):
+        s += ' "{}" '.format(o)
+    elif isinstance(o, list) or isinstance(o, tuple):
+        for i in range(len(o)):
+            s += ' [{}] {} '.format(i, getShape(o[i]))
+    elif hasattr(o, 'shape'):
+        s += ' {} '.format(o.shape)
+    elif hasattr(o, 'keys'):
+        for key in o.keys():
+            s += ' ["{}"] '.format(key) + getShape(o[key])
+    elif hasattr(o, '__iter__'):
+        for item in o:
+            s += getShape(item)
+    else:
+        s += ' {} '.format(type(o))
+    return s
