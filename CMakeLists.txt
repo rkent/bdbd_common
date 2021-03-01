@@ -57,6 +57,7 @@ add_message_files(FILES
    LeftRights.msg
    LrResults.msg
    MotorsRaw.msg
+   PanTilt.msg
 )
 
 ## Generate services in the 'srv' folder

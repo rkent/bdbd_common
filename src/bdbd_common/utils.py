@@ -1,9 +1,9 @@
 import inspect
 
-def reach(name) :
+def reach(_name) :
     # https://stackoverflow.com/questions/15608987/access-variables-of-caller-function-in-python
     for f in inspect.stack() :
-        if name in f[0].f_locals : return f[0].f_locals[name]
+        if _name in f[0].f_locals : return f[0].f_locals[_name]
     return None 
 
 def sstr(vs, **kwargs):
