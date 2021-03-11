@@ -1,15 +1,27 @@
 import inspect
 
-def reach(_name) :
+def reach(_name):
     # https://stackoverflow.com/questions/15608987/access-variables-of-caller-function-in-python
     for f in inspect.stack() :
         if _name in f[0].f_locals : return f[0].f_locals[_name]
     return None 
 
+def dotreach(_name):
+    vnames = _name.split('.')
+    value = None
+    for vname in vnames:
+        if value is not None:
+            value = getattr(value, vname)
+        else:
+            value = reach(vname)
+        if inspect.isroutine(value):
+            value = value()
+    return value
+
 def sstr(vs, **kwargs):
     dd = dict()
     for v in vs.split(' '):
-        dd[v] = reach(v)
+        dd[v] = dotreach(v)
     return fstr(dd, **kwargs)
 
 def fstr(v, fmat='6.3f', n_per_line=None):
