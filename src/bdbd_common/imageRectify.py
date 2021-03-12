@@ -9,12 +9,13 @@ from bdbd_common.messageSingle import messageSingle
 cvBridge = CvBridge()
 
 class ImageRectify():
-    def __init__(self, topic_base='/t265/fisheye1', do_publish=True):
+    def __init__(self, topic_base='/t265/fisheye1', do_publish=True, desired_encoding='bgr8'):
         rospy.loginfo('Getting camera_info for ' + topic_base)
         info_msg = messageSingle(topic_base + '/camera_info', CameraInfo)
         rospy.loginfo('Got camera_info')
         self.camera_model(info_msg)
         self.topic_base = topic_base
+        self.desired_encoding = desired_encoding
         self.rect_pub = do_publish and rospy.Publisher(topic_base + '/image_rect/compressed', CompressedImage, queue_size=1)
 
     def camera_model(self, msg):
@@ -26,7 +27,7 @@ class ImageRectify():
         )
 
     def get(self, cam_msg):
-        frame = cvBridge.compressed_imgmsg_to_cv2(cam_msg, desired_encoding='bgr8')
+        frame = cvBridge.compressed_imgmsg_to_cv2(cam_msg, desired_encoding=self.desired_encoding)
         img_rect = cv2.remap(src=frame, map1=self.m1, map2=self.m2, interpolation = cv2.INTER_LINEAR)
         if self.rect_pub:
             img_rect_msg = cvBridge.cv2_to_compressed_imgmsg(img_rect)
