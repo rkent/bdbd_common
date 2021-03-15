@@ -65,7 +65,8 @@ add_service_files(FILES
    DockerCommand.srv
    Dialog.srv
    ObjectDetect.srv
-   PanTiltS.srv
+   GetPanTilt.srv
+   SetPanTilt.srv
 )
 
 ## Generate actions in the 'action' folder
