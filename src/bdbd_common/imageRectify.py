@@ -10,10 +10,15 @@ cvBridge = CvBridge()
 
 class ImageRectify():
     def __init__(self, topic_base='/t265/fisheye1', do_publish=True, desired_encoding='bgr8'):
-        rospy.loginfo('Getting camera_info for ' + topic_base)
-        info_msg = messageSingle(topic_base + '/camera_info', CameraInfo)
+        camera_info_topic = topic_base + '/camera_info'
+        rospy.loginfo('Getting camera_info for ' + camera_info_topic)
+        try:
+            self.info_msg = rospy.wait_for_message(camera_info_topic, CameraInfo, timeout=5.0)
+        except rospy.ROSException as exception:
+            rospy.logwarn('No camera info message received, cannot rectify ({})'.format(exception))
+            raise exception
         rospy.loginfo('Got camera_info')
-        self.camera_model(info_msg)
+        self.camera_model(self.info_msg)
         self.topic_base = topic_base
         self.desired_encoding = desired_encoding
         self.rect_pub = do_publish and rospy.Publisher(topic_base + '/image_rect/compressed', CompressedImage, queue_size=1)
