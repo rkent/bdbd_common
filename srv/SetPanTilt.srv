@@ -1,5 +1,7 @@
 float32 pan
 float32 tilt
+bool raw
 ---
 float32 pan
 float32 tilt
+bool raw
