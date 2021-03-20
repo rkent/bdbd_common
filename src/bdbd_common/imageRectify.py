@@ -18,7 +18,7 @@ class ImageRectify():
             rospy.logwarn('No camera info message received, cannot rectify ({})'.format(exception))
             raise exception
         rospy.loginfo('Got camera_info')
-        self.camera_model(self.info_msg)
+        self.pcm = self.camera_model(self.info_msg)
         self.topic_base = topic_base
         self.desired_encoding = desired_encoding
         self.rect_pub = do_publish and rospy.Publisher(topic_base + '/image_rect/compressed', CompressedImage, queue_size=1)
@@ -30,6 +30,7 @@ class ImageRectify():
             pcm.K, pcm.D[:4], pcm.R, pcm.P,
             (msg.width, msg.height), cv2.CV_32FC1
         )
+        return pcm
 
     def get(self, cam_msg):
         frame = cvBridge.compressed_imgmsg_to_cv2(cam_msg, desired_encoding=self.desired_encoding)
