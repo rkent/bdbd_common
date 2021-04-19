@@ -26,15 +26,21 @@ class ImageRectify():
     def camera_model(self, msg):
         pcm = PinholeCameraModel()
         pcm.fromCameraInfo(msg)
-        (self.m1, self.m2) = cv2.fisheye.initUndistortRectifyMap(
-            pcm.K, pcm.D[:4], pcm.R, pcm.P,
-            (msg.width, msg.height), cv2.CV_32FC1
-        )
+        if msg.distortion_model == 'equidistant':
+            (self.m1, self.m2) = cv2.fisheye.initUndistortRectifyMap(
+                pcm.K, pcm.D[:4], pcm.R, pcm.P,
+                (msg.width, msg.height), cv2.CV_32FC1
+            )
+        else:
+            self.m1 = None
         return pcm
 
     def get(self, cam_msg):
         frame = cvBridge.compressed_imgmsg_to_cv2(cam_msg, desired_encoding=self.desired_encoding)
-        img_rect = cv2.remap(src=frame, map1=self.m1, map2=self.m2, interpolation = cv2.INTER_LINEAR)
+        if self.m1 is not None:
+            img_rect = cv2.remap(src=frame, map1=self.m1, map2=self.m2, interpolation = cv2.INTER_LINEAR)
+        else:
+            img_rect = frame
         if self.rect_pub:
             img_rect_msg = cvBridge.cv2_to_compressed_imgmsg(img_rect)
             self.rect_pub.publish(img_rect_msg)
