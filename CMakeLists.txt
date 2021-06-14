@@ -65,6 +65,7 @@ add_message_files(FILES
 add_service_files(FILES
    DockerCommand.srv
    Dialog.srv
+   NodeCommand.srv
    ObjectDetect.srv
    GetPanTilt.srv
    SetPanTilt.srv
