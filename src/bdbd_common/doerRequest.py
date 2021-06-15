@@ -18,7 +18,7 @@ class ActiveTopic():
 
 active_doers = {}
 
-class NodeRequest():
+class DoerRequest():
     def __init__(self):
         pass
 
@@ -49,7 +49,7 @@ class NodeRequest():
         del active_doers[name]
         return
 
-    def ensure_starter(self, type, timeout):
+    def ensure_starter(self, type, timeout=5.0):
         # throws rospy.ROSException upon timeout if fails
         rospy.loginfo('waiting for bdnodes service')
         if type == 'topic':
@@ -59,7 +59,7 @@ class NodeRequest():
         rospy.wait_for_service(service_name, timeout=timeout)
         return rospy.ServiceProxy(service_name, NodeCommand)
 
-    def ensure_doer(self, name, type, timeout):
+    def ensure_doer(self, name, type, timeout=5.0):
         if name not in active_doers:
             # doer is not active
             rospy.loginfo('trying to start doer for name {}'.format(name))
@@ -112,7 +112,8 @@ if __name__ == '__main__':
     TOPIC = '/bdbd/pantilt_camera/image_raw/compressed'
     SERVICE = '/bdbd/chat'
     rospy.init_node('doerRequest')
-    nr = NodeRequest()
+    nr = DoerRequest()
+    nr.ensure_doer('/bdbd/dialog', 'service')
     '''
     result = nr.wait_for_message(TOPIC, CompressedImage)
     print(result.header)
@@ -121,7 +122,9 @@ if __name__ == '__main__':
     nr.cancel_topic(TOPIC)
     '''
     chat_srv = nr.ServiceProxy(SERVICE, SpeechCommand)
-    sayit = chat_srv('chatservice', 'Are you a robot?').response
-    print(sayit)
+    for count in range(3):
+        sayit = chat_srv('chatservice', 'Are you a robot?').response
+        print(sayit)
+        rospy.sleep(5.0)
     # nr.cancel_doer(SERVICE)
 
