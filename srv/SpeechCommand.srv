@@ -1,0 +1,5 @@
+# Commands for speech response
+string command
+string detail
+---
+string response

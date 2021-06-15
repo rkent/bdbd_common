@@ -69,6 +69,7 @@ add_service_files(FILES
    ObjectDetect.srv
    GetPanTilt.srv
    SetPanTilt.srv
+   SpeechCommand.srv
 )
 
 ## Generate actions in the 'action' folder
