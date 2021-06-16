@@ -23,10 +23,18 @@ class DoerRequest():
         pass
 
     def ServiceProxy(self, name, service_class, persistent=False, headers=None, timeout=5.0):
+        name = rospy.resolve_name(name)
         self.ensure_doer(name, 'service', timeout)
         return rospy.ServiceProxy(name, service_class, persistent, headers)
 
+    def Subscriber(self, name, *args, **kwargs):
+        timeout = 5.0 if 'timeout' not in kwargs else kwargs['timeout']
+        name = rospy.resolve_name(name)
+        self.ensure_doer(name, 'topic', timeout=timeout)
+        return rospy.Subscriber(name, *args, **kwargs)
+
     def cancel_doer(self, name, timeout=5.0):
+        name = rospy.resolve_name(name)
         if not name in active_doers:
             rospy.loginfo('topic {} not active in this node'.format(name))
             return;
@@ -55,6 +63,7 @@ class DoerRequest():
         return rospy.ServiceProxy(service_name, NodeCommand)
 
     def ensure_doer(self, name, type, timeout=5.0):
+        name = rospy.resolve_name(name)
         isActive = False
         haveStarter = rosservice.get_service_list().count('/bdnodes/service') > 0
         if type == 'service':
@@ -94,6 +103,7 @@ class DoerRequest():
                 raise Exception('Failed to ensure doer for {}'.format(name))
 
     def wait_for_message(self, topic, topic_type, timeout=5.0):
+        topic = rospy.resolve_name(topic)
         # like rospy.wait_for_message but starts doer node if needed
         message = None
         active_topic = None
