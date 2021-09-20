@@ -94,13 +94,13 @@ class DoerRequest():
                 except:
                     rospy.logwarn('Probable timeout waiting for service {}'.format(name))
                     isActive = False
-            if isActive:
-                rospy.loginfo('doer startup succeeded for name {}'.format(name))
-                active_doers[name] = ActiveTopic(type)
-            else:
-                rospy.logwarn('doer startup failed for name {}'.format(name))
-            if not isActive:
-                raise Exception('Failed to ensure doer for {}'.format(name))
+                rospy.loginfo('doer startup status for name {}: {}'.format(name, isActive))
+        if isActive:
+            active_doers[name] = ActiveTopic(type)
+        else:
+            if not haveStarter:
+                rospy.logwarn('bdnodes not available while trying to start doer for {}'.format(name))
+            raise Exception('Failed to ensure doer for {}'.format(name))
 
     def wait_for_message(self, topic, topic_type, timeout=5.0):
         topic = rospy.resolve_name(topic)
@@ -115,7 +115,7 @@ class DoerRequest():
             else:
                 active_doers[topic] = ActiveTopic('topic')
         except rospy.ROSException:
-            rospy.logwarn('Could not get message for topic {}'.format(topic))
+            raise Exception('Could not get message for topic {}'.format(topic))
         return message
 
 if __name__ == '__main__':
